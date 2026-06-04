@@ -1,0 +1,28 @@
+# Secrets / file locali
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Output interni e file personali: MAI versionare
+.runtime_output/
+runtime_output/
+*_PRIVATO.csv
+*.log
+__pycache__/
+*.py[cod]
+
+# CSV non autorizzati
+/*.csv
+output/*.csv
+
+# Soltanto questi CSV sono destinati al link pubblico
+!output/12_concessionari_montecarlo_statistiche.csv
+!output/13_concessionari_montecarlo_per_concessionario.csv
+!output/13_concessionari_montecarlo_per_nome_commerciale.csv
+!output/13_concessionari_montecarlo_nomecommerciale_cliente_id.csv
+!output/20_concessionari_cluster_commerciali.csv
+!output/21_concessionari_cluster_summary.csv
+!output/16_top20_eventi_impatto_per_concessionario.csv
+!output/17_top20_eventi_impatto_per_nome_commerciale.csv

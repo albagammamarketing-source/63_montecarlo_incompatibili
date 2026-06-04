@@ -1,0 +1,1 @@
+Aggiungere nella root il file Matrice_Compatibilita_Esiti_Calcio_v1_0.xlsx prima di avviare il workflow.

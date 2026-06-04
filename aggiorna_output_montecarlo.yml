@@ -1,0 +1,92 @@
+name: Aggiorna output Monte Carlo pubblici
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "20 5 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  genera-output:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Installa dipendenze
+        run: pip install -r requirements.txt
+
+      - name: Controlla matrice esiti
+        run: |
+          test -f Matrice_Compatibilita_Esiti_Calcio_v1_0.xlsx || {
+            echo "Manca Matrice_Compatibilita_Esiti_Calcio_v1_0.xlsx nella root."
+            exit 1
+          }
+
+      - name: Esegui pipeline con CF interno e cliente_id pubblico
+        env:
+          PIPELINE_DB_CONFIG_JSON: ${{ secrets.PIPELINE_DB_CONFIG_JSON }}
+          PIPELINE_PSEUDONYM_SECRET: ${{ secrets.PIPELINE_PSEUDONYM_SECRET }}
+          PIPELINE_DB_PORT: ${{ secrets.PIPELINE_DB_PORT }}
+          PIPELINE_PROJECT_PATH: ${{ github.workspace }}
+          PIPELINE_BASE_PATH: ${{ github.workspace }}/.runtime_output
+          PIPELINE_MATRIX_FILE: ${{ github.workspace }}/Matrice_Compatibilita_Esiti_Calcio_v1_0.xlsx
+          PIPELINE_INCLUDE_CF: "true"
+          PIPELINE_SAVE_PRIVATE_CF_OUTPUT: "false"
+          PIPELINE_DES_STATO: "VENDUTO"
+          PIPELINE_GIORNI_BACK: "270"
+        run: python master_pepiline_concessionari.py
+
+      - name: Copia soltanto output pubblici autorizzati
+        run: |
+          mkdir -p output
+          cp .runtime_output/12_concessionari_montecarlo_statistiche.csv output/
+          cp .runtime_output/13_concessionari_montecarlo_per_concessionario.csv output/
+          cp .runtime_output/13_concessionari_montecarlo_per_nome_commerciale.csv output/
+          cp .runtime_output/13_concessionari_montecarlo_nomecommerciale_cliente_id.csv output/
+          cp .runtime_output/20_concessionari_cluster_commerciali.csv output/
+          cp .runtime_output/21_concessionari_cluster_summary.csv output/
+          cp .runtime_output/16_top20_eventi_impatto_per_concessionario.csv output/
+          cp .runtime_output/17_top20_eventi_impatto_per_nome_commerciale.csv output/
+
+      - name: Conferma assenza codici fiscali nell'output cliente pubblico
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          from pathlib import Path
+          file = Path("output/13_concessionari_montecarlo_nomecommerciale_cliente_id.csv")
+          df = pd.read_csv(file, sep=";", dtype=str)
+          vietate = {"codice_fiscale", "cf", "id_ticket", "ticket_key"}
+          presenti = vietate.intersection({c.lower() for c in df.columns})
+          if presenti:
+              raise SystemExit(f"Pubblicazione bloccata: colonne vietate presenti: {sorted(presenti)}")
+          if "cliente_id" not in {c.lower() for c in df.columns}:
+              raise SystemExit("Pubblicazione bloccata: cliente_id assente.")
+          print("Verifica output cliente pubblico superata.")
+          PY
+
+      - name: Pubblica CSV nel repository
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -f output/12_concessionari_montecarlo_statistiche.csv
+          git add -f output/13_concessionari_montecarlo_per_concessionario.csv
+          git add -f output/13_concessionari_montecarlo_per_nome_commerciale.csv
+          git add -f output/13_concessionari_montecarlo_nomecommerciale_cliente_id.csv
+          git add -f output/20_concessionari_cluster_commerciali.csv
+          git add -f output/21_concessionari_cluster_summary.csv
+          git add -f output/16_top20_eventi_impatto_per_concessionario.csv
+          git add -f output/17_top20_eventi_impatto_per_nome_commerciale.csv
+          git diff --cached --quiet && exit 0
+          git commit -m "Aggiornamento automatico output Monte Carlo pubblici"
+          git push
