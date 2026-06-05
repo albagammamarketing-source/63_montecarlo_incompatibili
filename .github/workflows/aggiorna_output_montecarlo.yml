@@ -1,4 +1,4 @@
-```yaml
+
 name: Aggiorna output Monte Carlo pubblici
 
 on:
@@ -148,4 +148,3 @@ jobs:
 
           git commit -m "Aggiornamento automatico output Monte Carlo pubblici"
           git push
-```
