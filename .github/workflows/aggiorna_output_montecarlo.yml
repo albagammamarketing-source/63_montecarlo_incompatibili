@@ -61,15 +61,34 @@ jobs:
         run: |
           python master_pepiline_concessionari.py
 
+      - name: Controlla output richiesti
+        run: |
+          set -e
+
+          files=(
+            ".runtime_output/12_concessionari_montecarlo_statistiche.csv"
+            ".runtime_output/13_concessionari_montecarlo_per_concessionario.csv"
+            ".runtime_output/13_concessionari_montecarlo_per_nome_commerciale.csv"
+            ".runtime_output/13_concessionari_montecarlo_nomecommerciale_cliente_id.csv"
+            ".runtime_output/20_concessionari_cluster_commerciali.csv"
+            ".runtime_output/21_concessionari_cluster_summary.csv"
+            ".runtime_output/16_top20_eventi_impatto_per_concessionario.csv"
+            ".runtime_output/17_top20_eventi_impatto_per_nome_commerciale.csv"
+            ".runtime_output/output_privato/mappa_cliente_id_codice_fiscale.csv"
+          )
+
+          for f in "${files[@]}"; do
+            if [ ! -f "$f" ]; then
+              echo "File mancante: $f"
+              exit 1
+            fi
+          done
+
+          echo "Tutti gli output richiesti sono presenti."
+
       - name: Copia output privato CF nella repository privata
         run: |
           mkdir -p output_privato
-
-          if [ ! -f ".runtime_output/output_privato/mappa_cliente_id_codice_fiscale.csv" ]; then
-            echo "Manca file privato: .runtime_output/output_privato/mappa_cliente_id_codice_fiscale.csv"
-            exit 1
-          fi
-
           cp .runtime_output/output_privato/mappa_cliente_id_codice_fiscale.csv output_privato/
 
       - name: Commit output privato nella repository privata
@@ -89,6 +108,7 @@ jobs:
 
       - name: Copia soltanto output pubblici autorizzati
         run: |
+          rm -rf output_pubblici
           mkdir -p output_pubblici
 
           cp .runtime_output/12_concessionari_montecarlo_statistiche.csv output_pubblici/
