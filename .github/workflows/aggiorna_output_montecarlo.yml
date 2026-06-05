@@ -11,7 +11,7 @@ permissions:
 jobs:
   genera-output:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 360
 
     steps:
       - name: Checkout repository privata codice
@@ -48,8 +48,7 @@ jobs:
           PIPELINE_DB_PASSWORD: ${{ secrets.PIPELINE_DB_PASSWORD }}
           PIPELINE_DB_PORT: ${{ secrets.PIPELINE_DB_PORT }}
 
-          PIPELINE_PSEUDONYM_SECRET: ${{ secrets.PIPELINE_PSEUDONYM_SECRET }}
-          CLIENTE_ID_SALT: ${{ secrets.PIPELINE_PSEUDONYM_SECRET }}
+          CLIENTE_ID_SALT: ${{ secrets.CLIENTE_ID_SALT }}
 
           PIPELINE_PROJECT_PATH: ${{ github.workspace }}
           PIPELINE_BASE_PATH: ${{ github.workspace }}/.runtime_output
@@ -108,6 +107,7 @@ jobs:
           from pathlib import Path
 
           cartella = Path("output_pubblici")
+
           colonne_vietate = {
               "codice_fiscale",
               "cf",
