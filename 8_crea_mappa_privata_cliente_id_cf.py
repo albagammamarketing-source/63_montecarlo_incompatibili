@@ -7,6 +7,9 @@ from pathlib import Path
 import pandas as pd
 
 
+# =========================================================
+# CONFIGURAZIONE
+# =========================================================
 BASE_PATH = Path(
     os.getenv(
         "PIPELINE_BASE_PATH",
@@ -21,19 +24,65 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 OUTPUT_FILE = OUTPUT_DIR / "mappa_cliente_id_codice_fiscale.csv"
 
+# IMPORTANTE:
+# In GitHub Actions imposta CLIENTE_ID_SALT nei Secrets.
+# Non cambiare mai il SALT dopo aver generato gli ID,
+# altrimenti cambieranno tutti i cliente_id.
 SALT = os.getenv("CLIENTE_ID_SALT", "cambia_questa_stringa_segreta")
 
 
-def crea_cliente_id(concessionario: str, codice_fiscale: str) -> str:
-    valore = f"{SALT}|{concessionario}|{codice_fiscale}".upper().strip()
-    return hashlib.sha256(valore.encode("utf-8")).hexdigest()[:16]
+# =========================================================
+# FUNZIONI
+# =========================================================
+def crea_cliente_id(codice_fiscale: str) -> str:
+    """
+    Genera un cliente_id stabile e univoco partendo SOLO dal codice fiscale.
+
+    Logica:
+    stesso codice_fiscale = stesso cliente_id
+    anche se il cliente compare su concessionari o punti vendita diversi.
+    """
+    cf = str(codice_fiscale).strip().upper()
+
+    if cf == "":
+        return ""
+
+    valore = f"{SALT}|{cf}"
+    return "CL_" + hashlib.sha256(valore.encode("utf-8")).hexdigest()[:20].upper()
 
 
-def main():
-    if not INPUT_FILE.exists():
-        raise FileNotFoundError(f"File non trovato: {INPUT_FILE}")
+def leggi_csv(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        raise FileNotFoundError(f"File non trovato: {path}")
 
-    df = pd.read_csv(INPUT_FILE, sep=";", dtype=str).fillna("")
+    try:
+        df = pd.read_csv(path, sep=";", dtype=str)
+    except Exception:
+        df = pd.read_csv(path, sep=None, engine="python", dtype=str)
+
+    df.columns = (
+        df.columns
+        .str.replace("\ufeff", "", regex=False)
+        .str.replace("ï»¿", "", regex=False)
+        .str.strip()
+        .str.lower()
+    )
+
+    return df.fillna("")
+
+
+# =========================================================
+# MAIN
+# =========================================================
+def main() -> None:
+    print("=" * 80)
+    print("CREAZIONE MAPPA PRIVATA CLIENTE_ID - CODICE_FISCALE")
+    print("=" * 80)
+    print(f"Input:  {INPUT_FILE}")
+    print(f"Output: {OUTPUT_FILE}")
+    print("=" * 80)
+
+    df = leggi_csv(INPUT_FILE)
 
     colonne_richieste = {
         "concessionario",
@@ -42,8 +91,9 @@ def main():
     }
 
     mancanti = colonne_richieste - set(df.columns)
+
     if mancanti:
-        raise ValueError(f"Colonne mancanti nel file input: {mancanti}")
+        raise ValueError(f"Colonne mancanti nel file input: {sorted(mancanti)}")
 
     df["concessionario"] = df["concessionario"].astype(str).str.strip().str.upper()
     df["nome_commerciale"] = df["nome_commerciale"].astype(str).str.strip()
@@ -51,33 +101,78 @@ def main():
 
     df = df[df["codice_fiscale"] != ""].copy()
 
-    df["cliente_id"] = df.apply(
-        lambda r: crea_cliente_id(
-            r["concessionario"],
-            r["codice_fiscale"]
-        ),
-        axis=1
-    )
+    if df.empty:
+        print("⚠ Nessun codice fiscale valido trovato.")
+        return
 
-    mappa = (
+    # Cliente ID generato SOLO dal codice fiscale
+    df["cliente_id"] = df["codice_fiscale"].apply(crea_cliente_id)
+
+    # Mappa privata univoca: 1 cliente_id = 1 codice_fiscale
+    mappa_base = (
         df[
             [
-                "concessionario",
-                "nome_commerciale",
                 "cliente_id",
                 "codice_fiscale",
             ]
         ]
         .drop_duplicates()
-        .sort_values(
+        .sort_values("cliente_id")
+        .reset_index(drop=True)
+    )
+
+    # Informazioni aggiuntive descrittive, non fanno parte della chiave primaria
+    info_cliente = (
+        df[
             [
+                "cliente_id",
                 "concessionario",
                 "nome_commerciale",
+            ]
+        ]
+        .drop_duplicates()
+        .sort_values(
+            [
                 "cliente_id",
+                "concessionario",
+                "nome_commerciale",
             ]
         )
         .reset_index(drop=True)
     )
+
+    # Aggrego concessionari e nomi commerciali collegati allo stesso cliente
+    info_aggregata = (
+        info_cliente
+        .groupby("cliente_id", dropna=False)
+        .agg(
+            concessionari=("concessionario", lambda x: " | ".join(sorted(set(x)))),
+            nomi_commerciali=("nome_commerciale", lambda x: " | ".join(sorted(set(x)))),
+        )
+        .reset_index()
+    )
+
+    mappa = mappa_base.merge(
+        info_aggregata,
+        on="cliente_id",
+        how="left"
+    )
+
+    # Controllo sicurezza: ogni cliente_id deve avere un solo CF
+    controllo = (
+        mappa
+        .groupby("cliente_id")["codice_fiscale"]
+        .nunique()
+        .reset_index(name="num_cf")
+    )
+
+    problemi = controllo[controllo["num_cf"] > 1]
+
+    if not problemi.empty:
+        raise ValueError(
+            "Errore: trovati cliente_id associati a più codici fiscali. "
+            "Controllare la funzione di hashing."
+        )
 
     mappa.to_csv(
         OUTPUT_FILE,
@@ -86,8 +181,11 @@ def main():
         encoding="utf-8-sig"
     )
 
-    print(f"Creato file privato: {OUTPUT_FILE}")
-    print(f"Righe mappa: {len(mappa)}")
+    print("\n✅ File privato creato correttamente")
+    print(f"Percorso: {OUTPUT_FILE}")
+    print(f"Clienti unici: {len(mappa)}")
+    print(f"Codici fiscali unici: {mappa['codice_fiscale'].nunique()}")
+    print("=" * 80)
 
 
 if __name__ == "__main__":
