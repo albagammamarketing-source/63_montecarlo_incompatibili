@@ -3,7 +3,7 @@ name: Aggiorna output Monte Carlo pubblici
 on:
   workflow_dispatch:
   schedule:
-    - cron: "20 5 * * *"
+    - cron: "20 */3 * * *"
 
 permissions:
   contents: read
