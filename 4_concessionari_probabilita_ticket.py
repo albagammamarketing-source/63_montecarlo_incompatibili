@@ -1,4 +1,4 @@
-from __future__ import annotations
+rom __future__ import annotations
 
 try:
     import pandas as pd
@@ -13,14 +13,13 @@ from pathlib import Path
 # =========================================================
 # PATH
 # =========================================================
-PROJECT_DIR = Path(
-    os.getenv("PIPELINE_PROJECT_PATH", str(Path(__file__).resolve().parent))
-).resolve()
-
 BASE_PATH = Path(
-    os.getenv("PIPELINE_BASE_PATH", str(PROJECT_DIR / ".runtime_output"))
-).resolve()
-BASE_PATH.mkdir(parents=True, exist_ok=True)
+    os.getenv(
+        "PIPELINE_BASE_PATH",
+        r"G:\Il mio Drive\progetti phyton\63_montecarlo_incompatibilita"
+    )
+)
+
 # Input preferito: file arricchito dallo script 3b.
 # Se non esiste, lo script usa il file allineato standard.
 FILE_TICKET_COMPAT = BASE_PATH / "4b_concessionari_ticket_eventi_compatibilita.csv"
