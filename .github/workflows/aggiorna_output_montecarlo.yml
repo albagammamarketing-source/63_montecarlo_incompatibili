@@ -41,27 +41,24 @@ jobs:
           rm -rf .runtime_output
           mkdir -p .runtime_output
 
-      - name: Esegui pipeline con CF interno e cliente_id pubblico
+           - name: Esegui pipeline con CF interno e cliente_id pubblico
         env:
-          # Connessione DB tramite GitHub Secrets
+          PIPELINE_DB_CONFIG_JSON: ${{ secrets.PIPELINE_DB_CONFIG_JSON }}
+
           PIPELINE_DB_HOST: ${{ secrets.PIPELINE_DB_HOST }}
           PIPELINE_DB_USER: ${{ secrets.PIPELINE_DB_USER }}
           PIPELINE_DB_PASSWORD: ${{ secrets.PIPELINE_DB_PASSWORD }}
           PIPELINE_DB_PORT: ${{ secrets.PIPELINE_DB_PORT }}
 
-          # Secret per pseudonimizzare codice fiscale -> cliente_id
           PIPELINE_PSEUDONYM_SECRET: ${{ secrets.PIPELINE_PSEUDONYM_SECRET }}
 
-          # Percorsi runtime
           PIPELINE_PROJECT_PATH: ${{ github.workspace }}
           PIPELINE_BASE_PATH: ${{ github.workspace }}/.runtime_output
           PIPELINE_MATRIX_FILE: ${{ github.workspace }}/Matrice_Compatibilita_Esiti_Calcio_v1_0.xlsx
 
-          # Policy sicurezza dati
           PIPELINE_INCLUDE_CF: "true"
           PIPELINE_SAVE_PRIVATE_CF_OUTPUT: "false"
 
-          # Filtri pipeline
           PIPELINE_DES_STATO: "VENDUTO"
           PIPELINE_GIORNI_BACK: "270"
 
