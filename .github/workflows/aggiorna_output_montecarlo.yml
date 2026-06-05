@@ -57,7 +57,7 @@ jobs:
           PIPELINE_INCLUDE_CF: "true"
           PIPELINE_SAVE_PRIVATE_CF_OUTPUT: "true"
           PIPELINE_DES_STATO: "VENDUTO"
-          PIPELINE_GIORNI_BACK: "270"
+          PIPELINE_GIORNI_BACK: "60"
         run: |
           python master_pepiline_concessionari.py
 
