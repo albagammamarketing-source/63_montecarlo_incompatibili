@@ -6,12 +6,13 @@ on:
     - cron: "20 */3 * * *"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   genera-output:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+
     steps:
       - name: Checkout repository privata codice
         uses: actions/checkout@v4
@@ -39,27 +40,58 @@ jobs:
           rm -rf .runtime_output
           mkdir -p .runtime_output
 
-      - name: Esegui pipeline con CF interno e cliente_id pubblico
+      - name: Esegui pipeline con CF interno, cliente_id pubblico e mappa privata
         env:
           PIPELINE_DB_CONFIG_JSON: ${{ secrets.PIPELINE_DB_CONFIG_JSON }}
           PIPELINE_DB_HOST: ${{ secrets.PIPELINE_DB_HOST }}
           PIPELINE_DB_USER: ${{ secrets.PIPELINE_DB_USER }}
           PIPELINE_DB_PASSWORD: ${{ secrets.PIPELINE_DB_PASSWORD }}
           PIPELINE_DB_PORT: ${{ secrets.PIPELINE_DB_PORT }}
+
           PIPELINE_PSEUDONYM_SECRET: ${{ secrets.PIPELINE_PSEUDONYM_SECRET }}
+          CLIENTE_ID_SALT: ${{ secrets.PIPELINE_PSEUDONYM_SECRET }}
+
           PIPELINE_PROJECT_PATH: ${{ github.workspace }}
           PIPELINE_BASE_PATH: ${{ github.workspace }}/.runtime_output
           PIPELINE_MATRIX_FILE: ${{ github.workspace }}/Matrice_Compatibilita_Esiti_Calcio_v1_0.xlsx
+
           PIPELINE_INCLUDE_CF: "true"
-          PIPELINE_SAVE_PRIVATE_CF_OUTPUT: "false"
+          PIPELINE_SAVE_PRIVATE_CF_OUTPUT: "true"
           PIPELINE_DES_STATO: "VENDUTO"
           PIPELINE_GIORNI_BACK: "270"
         run: |
           python master_pepiline_concessionari.py
 
+      - name: Copia output privato CF nella repository privata
+        run: |
+          mkdir -p output_privato
+
+          if [ ! -f ".runtime_output/output_privato/mappa_cliente_id_codice_fiscale.csv" ]; then
+            echo "Manca file privato: .runtime_output/output_privato/mappa_cliente_id_codice_fiscale.csv"
+            exit 1
+          fi
+
+          cp .runtime_output/output_privato/mappa_cliente_id_codice_fiscale.csv output_privato/
+
+      - name: Commit output privato nella repository privata
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+
+          git add -f output_privato/mappa_cliente_id_codice_fiscale.csv
+
+          git diff --cached --quiet && {
+            echo "Nessuna modifica privata da committare."
+            exit 0
+          }
+
+          git commit -m "Aggiornamento automatico mappa privata clienti"
+          git push
+
       - name: Copia soltanto output pubblici autorizzati
         run: |
           mkdir -p output_pubblici
+
           cp .runtime_output/12_concessionari_montecarlo_statistiche.csv output_pubblici/
           cp .runtime_output/13_concessionari_montecarlo_per_concessionario.csv output_pubblici/
           cp .runtime_output/13_concessionari_montecarlo_per_nome_commerciale.csv output_pubblici/
@@ -76,7 +108,12 @@ jobs:
           from pathlib import Path
 
           cartella = Path("output_pubblici")
-          colonne_vietate = {"codice_fiscale", "cf", "id_ticket", "ticket_key"}
+          colonne_vietate = {
+              "codice_fiscale",
+              "cf",
+              "id_ticket",
+              "ticket_key",
+          }
 
           file_cliente = cartella / "13_concessionari_montecarlo_nomecommerciale_cliente_id.csv"
 
@@ -122,10 +159,9 @@ jobs:
           git add -f output/*.csv
 
           git diff --cached --quiet && {
-            echo "Nessuna modifica da pubblicare."
+            echo "Nessuna modifica pubblica da pubblicare."
             exit 0
           }
 
           git commit -m "Aggiornamento automatico output Monte Carlo pubblici"
           git push
-
