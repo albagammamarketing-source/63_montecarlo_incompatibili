@@ -12,8 +12,6 @@ except ImportError:
     print("Installa numpy")
     raise
 
-import hashlib
-import hmac
 import os
 from pathlib import Path
 import re
@@ -22,20 +20,19 @@ import re
 # =========================================================
 # VERSIONE
 # =========================================================
-SCRIPT_VERSION = "5_montecarlo_con_compatibilita_v2_eventi_medi_cf"
+SCRIPT_VERSION = "5_montecarlo_con_compatibilita_v1"
 
 
 # =========================================================
 # PATH
 # =========================================================
-PROJECT_DIR = Path(
-    os.getenv("PIPELINE_PROJECT_PATH", str(Path(__file__).resolve().parent))
-).resolve()
-
 BASE_PATH = Path(
-    os.getenv("PIPELINE_BASE_PATH", str(PROJECT_DIR / ".runtime_output"))
-).resolve()
-BASE_PATH.mkdir(parents=True, exist_ok=True)
+    os.getenv(
+        "PIPELINE_BASE_PATH",
+        r"G:\Il mio Drive\progetti phyton\63_montecarlo_incompatibilita"
+    )
+)
+
 # Input preferito: file prodotto dallo script 3b.
 FILE_TICKET_COMPAT = BASE_PATH / "4b_concessionari_ticket_eventi_compatibilita.csv"
 
@@ -48,8 +45,7 @@ OUT_SIM = BASE_PATH / "11_concessionari_montecarlo_simulazioni.csv"
 OUT_STATS = BASE_PATH / "12_concessionari_montecarlo_statistiche.csv"
 OUT_PER_CONC = BASE_PATH / "13_concessionari_montecarlo_per_concessionario.csv"
 OUT_PER_COMM = BASE_PATH / "13_concessionari_montecarlo_per_nome_commerciale.csv"
-OUT_PER_COMM_CF_PRIVATO = BASE_PATH / "13_concessionari_montecarlo_nomecommerciale_cf_PRIVATO.csv"
-OUT_PER_COMM_CLIENTE_ID = BASE_PATH / "13_concessionari_montecarlo_nomecommerciale_cliente_id.csv"
+OUT_PER_COMM_CF = BASE_PATH / "13_concessionari_montecarlo_nomecommerciale_cf.csv"
 OUT_TOP_TICKET = BASE_PATH / "14_concessionari_top_ticket_rischio.csv"
 OUT_EVENTI = BASE_PATH / "15_concessionari_eventi_probabilita_drift.csv"
 OUT_MC_TICKET_INFO = BASE_PATH / "15b_concessionari_montecarlo_ticket_info_compatibilita.csv"
@@ -75,14 +71,6 @@ PROB_MAX = 0.999999
 
 # Se True, i ticket con flag_escludi_montecarlo=1 non possono vincere in nessuna iterazione.
 ESCLUDI_INCOMPATIBILI_DA_MONTECARLO = True
-
-# Il CF viene usato nel calcolo interno, ma non deve comparire negli output pubblici.
-SALVA_OUTPUT_PRIVATO_CF = (
-    os.getenv("PIPELINE_SAVE_PRIVATE_CF_OUTPUT", "false").strip().lower()
-    in {"1", "true", "yes", "si"}
-)
-
-PSEUDONYM_SECRET = os.getenv("PIPELINE_PSEUDONYM_SECRET", "").strip()
 
 
 # =========================================================
@@ -807,19 +795,7 @@ def crea_statistiche_per_commerciale(df_sim_comm: pd.DataFrame) -> pd.DataFrame:
     ).reset_index(drop=True)
 
 
-def crea_statistiche_per_nomecommerciale_cf(
-    df_sim_comm_cf: pd.DataFrame,
-    ticket_info: pd.DataFrame
-) -> pd.DataFrame:
-    """
-    Crea il riepilogo Monte Carlo per nome_commerciale + codice_fiscale.
-
-    La colonna eventi_medi_giocati_cf viene calcolata sui ticket del CF
-    presenti nel perimetro della simulazione Monte Carlo (ticket_info),
-    indipendentemente dall'esito vincente delle singole iterazioni.
-    I ticket eventualmente esclusi dalla compatibilita restano identificabili
-    tramite ticket_esclusi_compatibilita gia presente nell'output.
-    """
+def crea_statistiche_per_nomecommerciale_cf(df_sim_comm_cf: pd.DataFrame) -> pd.DataFrame:
     if df_sim_comm_cf.empty:
         return pd.DataFrame()
 
@@ -842,82 +818,11 @@ def crea_statistiche_per_nomecommerciale_cf(
         .reset_index()
     )
 
-    # Numero medio di eventi giocati dal CF sui ticket inseriti nel perimetro MC.
-    ticket_cf = ticket_info.copy()
-    ticket_cf["n_eventi"] = pd.to_numeric(ticket_cf["n_eventi"], errors="coerce")
-
-    eventi_medi_cf = (
-        ticket_cf.groupby(
-            ["concessionario", "nome_commerciale", "codice_fiscale"],
-            dropna=False
-        )
-        .agg(
-            eventi_medi_giocati_cf=("n_eventi", "mean"),
-        )
-        .reset_index()
-    )
-
-    eventi_medi_cf["eventi_medi_giocati_cf"] = (
-        pd.to_numeric(eventi_medi_cf["eventi_medi_giocati_cf"], errors="coerce")
-        .round(2)
-    )
-
-    out = out.merge(
-        eventi_medi_cf,
-        on=["concessionario", "nome_commerciale", "codice_fiscale"],
-        how="left"
-    )
-
-    out["eventi_medi_giocati_cf"] = (
-        pd.to_numeric(out["eventi_medi_giocati_cf"], errors="coerce")
-        .fillna(0)
-        .round(2)
-    )
-
     return out.sort_values(
         by=["payout_p95", "payout_medio"],
         ascending=False
     ).reset_index(drop=True)
 
-
-
-# =========================================================
-# OUTPUT PUBBLICO CLIENTE PSEUDONIMIZZATO
-# =========================================================
-def genera_cliente_id(codice_fiscale: str) -> str:
-    """Genera un identificativo stabile senza pubblicare il codice fiscale."""
-    cf = str(codice_fiscale).strip().upper()
-    if not cf:
-        return ""
-
-    if not PSEUDONYM_SECRET:
-        raise EnvironmentError(
-            "Manca PIPELINE_PSEUDONYM_SECRET: necessario per creare cliente_id."
-        )
-
-    digest = hmac.new(
-        PSEUDONYM_SECRET.encode("utf-8"),
-        cf.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()[:20].upper()
-
-    return f"CL_{digest}"
-
-
-def crea_output_pubblico_cliente_id(df_per_comm_cf: pd.DataFrame) -> pd.DataFrame:
-    """Sostituisce il CF con cliente_id; questo è l'unico file cliente pubblicabile."""
-    if df_per_comm_cf.empty:
-        return pd.DataFrame()
-
-    out = df_per_comm_cf.copy()
-    out["cliente_id"] = out["codice_fiscale"].apply(genera_cliente_id)
-
-    # Nessun codice fiscale nel CSV destinato alla pubblicazione.
-    out = out.drop(columns=["codice_fiscale"], errors="ignore")
-
-    prime = ["concessionario", "nome_commerciale", "cliente_id"]
-    resto = [c for c in out.columns if c not in prime]
-    return out[prime + resto]
 
 # =========================================================
 # MAIN
@@ -974,11 +879,7 @@ def main():
     df_stats = crea_statistiche_globali(df_sim, eventi, ticket_info)
     df_per_conc = crea_statistiche_per_concessionario(df_sim_conc)
     df_per_comm = crea_statistiche_per_commerciale(df_sim_comm)
-    df_per_comm_cf = crea_statistiche_per_nomecommerciale_cf(
-        df_sim_comm_cf,
-        ticket_info
-    )
-    df_per_comm_cliente_id = crea_output_pubblico_cliente_id(df_per_comm_cf)
+    df_per_comm_cf = crea_statistiche_per_nomecommerciale_cf(df_sim_comm_cf)
 
     eventi_out = eventi.copy()
 
@@ -1002,9 +903,7 @@ def main():
     scrivi_csv(df_stats, OUT_STATS)
     scrivi_csv(df_per_conc, OUT_PER_CONC)
     scrivi_csv(df_per_comm, OUT_PER_COMM)
-    scrivi_csv(df_per_comm_cliente_id, OUT_PER_COMM_CLIENTE_ID)
-    if SALVA_OUTPUT_PRIVATO_CF:
-        scrivi_csv(df_per_comm_cf, OUT_PER_COMM_CF_PRIVATO)
+    scrivi_csv(df_per_comm_cf, OUT_PER_COMM_CF)
     scrivi_csv(eventi_out, OUT_EVENTI)
     scrivi_csv(ticket_info_out, OUT_MC_TICKET_INFO)
 
@@ -1015,9 +914,7 @@ def main():
     print(OUT_STATS)
     print(OUT_PER_CONC)
     print(OUT_PER_COMM)
-    print(OUT_PER_COMM_CLIENTE_ID)
-    if SALVA_OUTPUT_PRIVATO_CF:
-        print(OUT_PER_COMM_CF_PRIVATO)
+    print(OUT_PER_COMM_CF)
     print(OUT_TOP_TICKET)
     print(OUT_EVENTI)
     print(OUT_MC_TICKET_INFO)
@@ -1027,8 +924,7 @@ def main():
     print(f"Simulazioni Monte Carlo: {len(df_sim)}")
     print(f"Righe per concessionario: {len(df_per_conc)}")
     print(f"Righe per nome commerciale: {len(df_per_comm)}")
-    print(f"Righe per nome commerciale + cliente_id pubblico: {len(df_per_comm_cliente_id)}")
-    print("Codice fiscale usato internamente e sostituito da cliente_id nell'output pubblico.")
+    print(f"Righe per nome commerciale + codice fiscale: {len(df_per_comm_cf)}")
     print(f"Ticket esclusi per incompatibilità: {int(ticket_info['flag_escludi_montecarlo'].sum())}")
 
     if not top_ticket.empty:
