@@ -35,7 +35,7 @@ OUTPUT_TICKET_EVENTI_CSV = BASE_PATH / "2_concessionari_ticket_eventi.csv"
 DB_PORT = int(os.getenv("PIPELINE_DB_PORT", "3306"))
 DES_STATO = os.getenv("PIPELINE_DES_STATO", "VENDUTO").strip()
 NOME_COMMERCIALE = os.getenv("PIPELINE_NOME_COMMERCIALE", "").strip() or None
-GIORNI_BACK = int(os.getenv("PIPELINE_GIORNI_BACK", "270"))
+GIORNI_BACK = int(os.getenv("PIPELINE_GIORNI_BACK", "120"))
 DATA_DA = os.getenv("PIPELINE_DATA_DA", "").strip()
 DATA_A = os.getenv("PIPELINE_DATA_A", "").strip()
 
