@@ -1,141 +1,131 @@
 name: Aggiorna output Monte Carlo pubblici
 
 on:
-workflow_dispatch:
-schedule:
-- cron: "20 5 * * *"
+  workflow_dispatch:
+  schedule:
+    - cron: "20 5 * * *"
 
 permissions:
-contents: read
+  contents: read
 
 jobs:
-genera-output:
-runs-on: ubuntu-latest
-timeout-minutes: 90
-steps:
-  - name: Checkout repository privata codice
-    uses: actions/checkout@v4
+  genera-output:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository privata codice
+        uses: actions/checkout@v4
 
-  - name: Setup Python
-    uses: actions/setup-python@v5
-    with:
-      python-version: "3.12"
-      cache: "pip"
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
 
-  - name: Installa dipendenze
-    run: |
-      python -m pip install --upgrade pip
-      pip install -r requirements.txt
+      - name: Installa dipendenze
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-  - name: Controlla matrice esiti
-    run: |
-      test -f Matrice_Compatibilita_Esiti_Calcio_v1_0.xlsx || {
-        echo "Manca Matrice_Compatibilita_Esiti_Calcio_v1_0.xlsx nella root."
-        exit 1
-      }
+      - name: Controlla matrice esiti
+        run: |
+          test -f Matrice_Compatibilita_Esiti_Calcio_v1_0.xlsx || {
+            echo "Manca Matrice_Compatibilita_Esiti_Calcio_v1_0.xlsx nella root."
+            exit 1
+          }
 
-  - name: Prepara cartella runtime
-    run: |
-      rm -rf .runtime_output
-      mkdir -p .runtime_output
+      - name: Prepara cartella runtime
+        run: |
+          rm -rf .runtime_output
+          mkdir -p .runtime_output
 
-  - name: Esegui pipeline con CF interno e cliente_id pubblico
-    env:
-      PIPELINE_DB_CONFIG_JSON: ${{ secrets.PIPELINE_DB_CONFIG_JSON }}
-      PIPELINE_DB_HOST: ${{ secrets.PIPELINE_DB_HOST }}
-      PIPELINE_DB_USER: ${{ secrets.PIPELINE_DB_USER }}
-      PIPELINE_DB_PASSWORD: ${{ secrets.PIPELINE_DB_PASSWORD }}
-      PIPELINE_DB_PORT: ${{ secrets.PIPELINE_DB_PORT }}
-      PIPELINE_PSEUDONYM_SECRET: ${{ secrets.PIPELINE_PSEUDONYM_SECRET }}
-      PIPELINE_PROJECT_PATH: ${{ github.workspace }}
-      PIPELINE_BASE_PATH: ${{ github.workspace }}/.runtime_output
-      PIPELINE_MATRIX_FILE: ${{ github.workspace }}/Matrice_Compatibilita_Esiti_Calcio_v1_0.xlsx
-      PIPELINE_INCLUDE_CF: "true"
-      PIPELINE_SAVE_PRIVATE_CF_OUTPUT: "false"
-      PIPELINE_DES_STATO: "VENDUTO"
-      PIPELINE_GIORNI_BACK: "270"
-    run: |
-      python master_pepiline_concessionari.py
+      - name: Esegui pipeline con CF interno e cliente_id pubblico
+        env:
+          PIPELINE_DB_CONFIG_JSON: ${{ secrets.PIPELINE_DB_CONFIG_JSON }}
+          PIPELINE_DB_HOST: ${{ secrets.PIPELINE_DB_HOST }}
+          PIPELINE_DB_USER: ${{ secrets.PIPELINE_DB_USER }}
+          PIPELINE_DB_PASSWORD: ${{ secrets.PIPELINE_DB_PASSWORD }}
+          PIPELINE_DB_PORT: ${{ secrets.PIPELINE_DB_PORT }}
+          PIPELINE_PSEUDONYM_SECRET: ${{ secrets.PIPELINE_PSEUDONYM_SECRET }}
+          PIPELINE_PROJECT_PATH: ${{ github.workspace }}
+          PIPELINE_BASE_PATH: ${{ github.workspace }}/.runtime_output
+          PIPELINE_MATRIX_FILE: ${{ github.workspace }}/Matrice_Compatibilita_Esiti_Calcio_v1_0.xlsx
+          PIPELINE_INCLUDE_CF: "true"
+          PIPELINE_SAVE_PRIVATE_CF_OUTPUT: "false"
+          PIPELINE_DES_STATO: "VENDUTO"
+          PIPELINE_GIORNI_BACK: "270"
+        run: |
+          python master_pepiline_concessionari.py
 
-  - name: Copia soltanto output pubblici autorizzati
-    run: |
-      mkdir -p output_pubblici
+      - name: Copia soltanto output pubblici autorizzati
+        run: |
+          mkdir -p output_pubblici
+          cp .runtime_output/12_concessionari_montecarlo_statistiche.csv output_pubblici/
+          cp .runtime_output/13_concessionari_montecarlo_per_concessionario.csv output_pubblici/
+          cp .runtime_output/13_concessionari_montecarlo_per_nome_commerciale.csv output_pubblici/
+          cp .runtime_output/13_concessionari_montecarlo_nomecommerciale_cliente_id.csv output_pubblici/
+          cp .runtime_output/20_concessionari_cluster_commerciali.csv output_pubblici/
+          cp .runtime_output/21_concessionari_cluster_summary.csv output_pubblici/
+          cp .runtime_output/16_top20_eventi_impatto_per_concessionario.csv output_pubblici/
+          cp .runtime_output/17_top20_eventi_impatto_per_nome_commerciale.csv output_pubblici/
 
-      cp .runtime_output/12_concessionari_montecarlo_statistiche.csv output_pubblici/
-      cp .runtime_output/13_concessionari_montecarlo_per_concessionario.csv output_pubblici/
-      cp .runtime_output/13_concessionari_montecarlo_per_nome_commerciale.csv output_pubblici/
-      cp .runtime_output/13_concessionari_montecarlo_nomecommerciale_cliente_id.csv output_pubblici/
-      cp .runtime_output/20_concessionari_cluster_commerciali.csv output_pubblici/
-      cp .runtime_output/21_concessionari_cluster_summary.csv output_pubblici/
-      cp .runtime_output/16_top20_eventi_impatto_per_concessionario.csv output_pubblici/
-      cp .runtime_output/17_top20_eventi_impatto_per_nome_commerciale.csv output_pubblici/
+      - name: Conferma assenza dati sensibili negli output pubblici
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          from pathlib import Path
 
-  - name: Conferma assenza dati sensibili negli output pubblici
-    run: |
-      python - <<'PY'
-      import pandas as pd
-      from pathlib import Path
+          cartella = Path("output_pubblici")
+          colonne_vietate = {"codice_fiscale", "cf", "id_ticket", "ticket_key"}
 
-      cartella = Path("output_pubblici")
+          file_cliente = cartella / "13_concessionari_montecarlo_nomecommerciale_cliente_id.csv"
 
-      colonne_vietate = {
-          "codice_fiscale",
-          "cf",
-          "id_ticket",
-          "ticket_key"
-      }
+          if not file_cliente.exists():
+              raise SystemExit(f"Pubblicazione bloccata: manca {file_cliente}")
 
-      file_cliente = cartella / "13_concessionari_montecarlo_nomecommerciale_cliente_id.csv"
+          for file in cartella.glob("*.csv"):
+              df = pd.read_csv(file, sep=";", dtype=str)
+              colonne = {str(c).strip().lower() for c in df.columns}
+              presenti = colonne_vietate.intersection(colonne)
 
-      if not file_cliente.exists():
-          raise SystemExit(f"Pubblicazione bloccata: manca {file_cliente}")
+              if presenti:
+                  raise SystemExit(
+                      f"Pubblicazione bloccata: colonne vietate presenti in {file.name}: {sorted(presenti)}"
+                  )
 
-      for file in cartella.glob("*.csv"):
-          df = pd.read_csv(file, sep=";", dtype=str)
-          colonne = {str(c).strip().lower() for c in df.columns}
+          df_cliente = pd.read_csv(file_cliente, sep=";", dtype=str)
+          colonne_cliente = {str(c).strip().lower() for c in df_cliente.columns}
 
-          presenti = colonne_vietate.intersection(colonne)
+          if "cliente_id" not in colonne_cliente:
+              raise SystemExit("Pubblicazione bloccata: cliente_id assente nel file cliente pubblico.")
 
-          if presenti:
-              raise SystemExit(
-                  f"Pubblicazione bloccata: colonne vietate presenti in {file.name}: {sorted(presenti)}"
-              )
+          print("Verifica output pubblici superata: nessuna colonna sensibile trovata.")
+          PY
 
-      df_cliente = pd.read_csv(file_cliente, sep=";", dtype=str)
-      colonne_cliente = {str(c).strip().lower() for c in df_cliente.columns}
+      - name: Checkout repository pubblica output
+        uses: actions/checkout@v4
+        with:
+          repository: albagammamarketing-source/output-63_montecarlo_pubblici
+          token: ${{ secrets.OUTPUT_REPO_TOKEN }}
+          path: repo_output_pubblico
 
-      if "cliente_id" not in colonne_cliente:
-          raise SystemExit("Pubblicazione bloccata: cliente_id assente nel file cliente pubblico.")
+      - name: Pubblica CSV nella repository pubblica
+        run: |
+          mkdir -p repo_output_pubblico/output
+          cp output_pubblici/*.csv repo_output_pubblico/output/
 
-      print("Verifica output pubblici superata: nessuna colonna sensibile trovata.")
-      PY
+          cd repo_output_pubblico
 
-  - name: Checkout repository pubblica output
-    uses: actions/checkout@v4
-    with:
-      repository: albagammamarketing-source/output-63_montecarlo_pubblici
-      token: ${{ secrets.OUTPUT_REPO_TOKEN }}
-      path: repo_output_pubblico
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
 
-  - name: Pubblica CSV nella repository pubblica
-    run: |
-      mkdir -p repo_output_pubblico/output
+          git add -f output/*.csv
 
-      cp output_pubblici/*.csv repo_output_pubblico/output/
+          git diff --cached --quiet && {
+            echo "Nessuna modifica da pubblicare."
+            exit 0
+          }
 
-      cd repo_output_pubblico
-
-      git config user.name "github-actions"
-      git config user.email "github-actions@users.noreply.github.com"
-
-      git add -f output/*.csv
-
-      git diff --cached --quiet && {
-        echo "Nessuna modifica da pubblicare."
-        exit 0
-      }
-
-      git commit -m "Aggiornamento automatico output Monte Carlo pubblici"
-      git push
-```
+          git commit -m "Aggiornamento automatico output Monte Carlo pubblici"
+          git push
 
