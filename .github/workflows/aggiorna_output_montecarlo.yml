@@ -1,4 +1,3 @@
-
 name: Aggiorna output Monte Carlo pubblici
 
 on:
@@ -13,6 +12,8 @@ jobs:
 genera-output:
 runs-on: ubuntu-latest
 timeout-minutes: 360
+
+```
 steps:
   - name: Checkout repository privata codice
     uses: actions/checkout@v4
@@ -47,13 +48,10 @@ steps:
       PIPELINE_DB_USER: ${{ secrets.PIPELINE_DB_USER }}
       PIPELINE_DB_PASSWORD: ${{ secrets.PIPELINE_DB_PASSWORD }}
       PIPELINE_DB_PORT: ${{ secrets.PIPELINE_DB_PORT }}
-
       CLIENTE_ID_SALT: ${{ secrets.CLIENTE_ID_SALT }}
-
       PIPELINE_PROJECT_PATH: ${{ github.workspace }}
       PIPELINE_BASE_PATH: ${{ github.workspace }}/.runtime_output
       PIPELINE_MATRIX_FILE: ${{ github.workspace }}/Matrice_Compatibilita_Esiti_Calcio_v1_0.xlsx
-
       PIPELINE_INCLUDE_CF: "true"
       PIPELINE_SAVE_PRIVATE_CF_OUTPUT: "true"
       PIPELINE_DES_STATO: "VENDUTO"
@@ -95,9 +93,7 @@ steps:
           col_cf = colonne_lower.get("codice_fiscale") or colonne_lower.get("cf")
 
           if not col_cf:
-              raise SystemExit(
-                  "Impossibile creare cliente_id: manca codice_fiscale/cf nel file sorgente."
-              )
+              raise SystemExit("Impossibile creare cliente_id: manca codice_fiscale/cf nel file sorgente.")
 
           mappa = {}
 
@@ -277,3 +273,4 @@ steps:
 
       git commit -m "Aggiornamento automatico output Monte Carlo pubblici"
       git push
+```
