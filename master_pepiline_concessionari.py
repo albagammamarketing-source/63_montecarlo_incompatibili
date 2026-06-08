@@ -65,7 +65,6 @@ STEPS = [
     Step(5, "Monte Carlo DEF con cliente_id pubblico", "5_concessionari_metodo_montecarlo_DEF.py", RUN_MONTECARLO_DEF),
     Step(6, "Rischio cluster", "6_concessionari_rischio_cluster.py", RUN_RISCHIO_CLUSTER),
     Step(7, "Top eventi impatto nome commerciale", "7_concessionari_top_eventi_impatto_nome_commerciale.py", RUN_TOP_EVENTI),
-    Step(8, "Crea mappa privata cliente_id codice fiscale", "8_crea_mappa_privata_cliente_id_cf.py", RUN_MAPPA_PRIVATA_CLIENTI),
 ]
 
 
