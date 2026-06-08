@@ -20,7 +20,7 @@ import re
 # =========================================================
 # VERSIONE
 # =========================================================
-SCRIPT_VERSION = "5_montecarlo_con_compatibilita_v1"
+SCRIPT_VERSION = "5_montecarlo_con_compatibilita_v3_eventi_medi_ticket_totali_cf"
 
 
 # =========================================================
@@ -58,7 +58,7 @@ NOME_COMMERCIALE = None
 CONCESSIONARIO = None
 TOP_N = 100
 
-N_SIM = int(os.getenv("PIPELINE_N_SIM", "500"))
+N_SIM = 5000
 SEED = 42
 
 SOGLIE_PAYOUT = [10000, 25000, 50000, 100000]
@@ -795,7 +795,18 @@ def crea_statistiche_per_commerciale(df_sim_comm: pd.DataFrame) -> pd.DataFrame:
     ).reset_index(drop=True)
 
 
-def crea_statistiche_per_nomecommerciale_cf(df_sim_comm_cf: pd.DataFrame) -> pd.DataFrame:
+def crea_statistiche_per_nomecommerciale_cf(
+    df_sim_comm_cf: pd.DataFrame,
+    ticket_info: pd.DataFrame
+) -> pd.DataFrame:
+    """
+    Crea il riepilogo Monte Carlo per concessionario + nome_commerciale + codice_fiscale.
+
+    Colonne aggiunte:
+    - eventi_medi_giocati_cf: numero medio di eventi giocati per ticket dal CF.
+    - ticket_totali_cf: numero totale di ticket del CF nel perimetro Monte Carlo.
+    - eventi_totali_giocati_cf: somma totale degli eventi giocati dal CF.
+    """
     if df_sim_comm_cf.empty:
         return pd.DataFrame()
 
@@ -816,6 +827,103 @@ def crea_statistiche_per_nomecommerciale_cf(df_sim_comm_cf: pd.DataFrame) -> pd.
             ticket_esclusi_compatibilita=("ticket_esclusi_compatibilita", "max"),
         )
         .reset_index()
+    )
+
+    # ticket_info contiene una riga per ticket modelizzato in Monte Carlo.
+    # La colonna n_eventi indica quanti eventi compongono il ticket.
+    ticket_cf = ticket_info.copy()
+
+    colonne_richieste = {
+        "concessionario",
+        "nome_commerciale",
+        "codice_fiscale",
+        "n_eventi",
+    }
+
+    if not colonne_richieste.issubset(ticket_cf.columns):
+        out["eventi_medi_giocati_cf"] = 0.0
+        out["ticket_totali_cf"] = 0
+        out["eventi_totali_giocati_cf"] = 0
+        return out.sort_values(
+            by=["payout_p95", "payout_medio"],
+            ascending=False
+        ).reset_index(drop=True)
+
+    if "ticket_key" not in ticket_cf.columns:
+        if "id_ticket" in ticket_cf.columns:
+            ticket_cf["ticket_key"] = (
+                ticket_cf["concessionario"].astype(str) + "||" +
+                ticket_cf["id_ticket"].astype(str)
+            )
+        else:
+            ticket_cf["ticket_key"] = ticket_cf.index.astype(str)
+
+    ticket_cf["n_eventi"] = pd.to_numeric(
+        ticket_cf["n_eventi"],
+        errors="coerce"
+    ).fillna(0)
+
+    eventi_medi_cf = (
+        ticket_cf.groupby(
+            ["concessionario", "nome_commerciale", "codice_fiscale"],
+            dropna=False
+        )
+        .agg(
+            eventi_medi_giocati_cf=("n_eventi", "mean"),
+            ticket_totali_cf=("ticket_key", "nunique"),
+            eventi_totali_giocati_cf=("n_eventi", "sum"),
+        )
+        .reset_index()
+    )
+
+    eventi_medi_cf["eventi_medi_giocati_cf"] = (
+        pd.to_numeric(eventi_medi_cf["eventi_medi_giocati_cf"], errors="coerce")
+        .fillna(0)
+        .round(2)
+    )
+
+    eventi_medi_cf["ticket_totali_cf"] = (
+        pd.to_numeric(eventi_medi_cf["ticket_totali_cf"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+    )
+
+    eventi_medi_cf["eventi_totali_giocati_cf"] = (
+        pd.to_numeric(eventi_medi_cf["eventi_totali_giocati_cf"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+    )
+
+    out = out.merge(
+        eventi_medi_cf,
+        on=["concessionario", "nome_commerciale", "codice_fiscale"],
+        how="left"
+    )
+
+    for col in [
+        "eventi_medi_giocati_cf",
+        "ticket_totali_cf",
+        "eventi_totali_giocati_cf",
+    ]:
+        if col not in out.columns:
+            out[col] = 0
+
+    out["eventi_medi_giocati_cf"] = (
+        pd.to_numeric(out["eventi_medi_giocati_cf"], errors="coerce")
+        .fillna(0)
+        .round(2)
+    )
+
+    out["ticket_totali_cf"] = (
+        pd.to_numeric(out["ticket_totali_cf"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+    )
+
+    out["eventi_totali_giocati_cf"] = (
+        pd.to_numeric(out["eventi_totali_giocati_cf"], errors="coerce")
+        .fillna(0)
+        .astype(int)
     )
 
     return out.sort_values(
@@ -879,7 +987,10 @@ def main():
     df_stats = crea_statistiche_globali(df_sim, eventi, ticket_info)
     df_per_conc = crea_statistiche_per_concessionario(df_sim_conc)
     df_per_comm = crea_statistiche_per_commerciale(df_sim_comm)
-    df_per_comm_cf = crea_statistiche_per_nomecommerciale_cf(df_sim_comm_cf)
+    df_per_comm_cf = crea_statistiche_per_nomecommerciale_cf(
+        df_sim_comm_cf,
+        ticket_info
+    )
 
     eventi_out = eventi.copy()
 
@@ -925,6 +1036,7 @@ def main():
     print(f"Righe per concessionario: {len(df_per_conc)}")
     print(f"Righe per nome commerciale: {len(df_per_comm)}")
     print(f"Righe per nome commerciale + codice fiscale: {len(df_per_comm_cf)}")
+    print("Nuova colonna CF esportata: eventi_medi_giocati_cf")
     print(f"Ticket esclusi per incompatibilità: {int(ticket_info['flag_escludi_montecarlo'].sum())}")
 
     if not top_ticket.empty:
