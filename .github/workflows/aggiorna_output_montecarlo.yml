@@ -62,12 +62,8 @@ jobs:
           set -e
 
           files=(
-            ".runtime_output/1_concessionari_anagrafica_eventi.csv"
-            ".runtime_output/2_concessionari_ticket_eventi.csv"
-            ".runtime_output/3_concessionari_anagrafica_eventi_allineata.csv"
-            ".runtime_output/4_concessionari_ticket_eventi_allineato.csv"
-            ".runtime_output/4b_concessionari_ticket_eventi_compatibilita.csv"
             ".runtime_output/9_concessionari_ticket_probabilistico.csv"
+            ".runtime_output/10_concessionari_riepilogo_probabilistico_per_nome_commerciale.csv"
             ".runtime_output/11_concessionari_montecarlo_simulazioni.csv"
             ".runtime_output/12_concessionari_montecarlo_statistiche.csv"
             ".runtime_output/13_concessionari_montecarlo_per_concessionario.csv"
@@ -94,13 +90,32 @@ jobs:
             fi
           done
 
-          echo "Tutti gli output richiesti sono presenti."
+          echo "Tutti gli output finali richiesti sono presenti."
 
-      - name: Copia output completi nella cartella output
+      - name: Copia output finali nella cartella output
         run: |
           rm -rf output
           mkdir -p output
-          cp .runtime_output/*.csv output/
+
+          cp .runtime_output/9_concessionari_ticket_probabilistico.csv output/
+          cp .runtime_output/10_concessionari_riepilogo_probabilistico_per_nome_commerciale.csv output/
+          cp .runtime_output/11_concessionari_montecarlo_simulazioni.csv output/
+          cp .runtime_output/12_concessionari_montecarlo_statistiche.csv output/
+          cp .runtime_output/13_concessionari_montecarlo_per_concessionario.csv output/
+          cp .runtime_output/13_concessionari_montecarlo_per_nome_commerciale.csv output/
+          cp .runtime_output/13_concessionari_montecarlo_nomecommerciale_cf.csv output/
+          cp .runtime_output/14_concessionari_top_ticket_rischio.csv output/
+          cp .runtime_output/15_concessionari_eventi_probabilita_drift.csv output/
+          cp .runtime_output/15b_concessionari_montecarlo_ticket_info_compatibilita.csv output/
+          cp .runtime_output/16_concessionari_ticket_incompatibili.csv output/
+          cp .runtime_output/17_concessionari_coppie_esiti_non_mappate.csv output/
+          cp .runtime_output/18_concessionari_riepilogo_compatibilita.csv output/
+          cp .runtime_output/19_concessionari_diagnostica_mapping_esiti.csv output/
+          cp .runtime_output/20_concessionari_cluster_commerciali.csv output/
+          cp .runtime_output/21_concessionari_cluster_summary.csv output/
+          cp .runtime_output/16_top20_eventi_impatto_per_concessionario.csv output/
+          cp .runtime_output/17_top20_eventi_impatto_per_nome_commerciale.csv output/
+          cp .runtime_output/18_eventi_impatto_completo.csv output/
 
       - name: Verifica presenza codice fiscale
         run: |
@@ -122,7 +137,12 @@ jobs:
           print("Verifica superata: il file contiene il codice fiscale.")
           PY
 
-      - name: Commit output completi nella repository
+      - name: Mostra dimensione output
+        run: |
+          echo "Dimensione file output:"
+          ls -lh output/
+
+      - name: Commit output finali nella repository
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
@@ -134,5 +154,5 @@ jobs:
             exit 0
           }
 
-          git commit -m "Aggiornamento automatico output Monte Carlo completi"
+          git commit -m "Aggiornamento automatico output Monte Carlo finali"
           git push
