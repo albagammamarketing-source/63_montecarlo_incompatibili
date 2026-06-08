@@ -1,4 +1,4 @@
-name: Aggiorna output Monte Carlo pubblici
+name: Aggiorna output Monte Carlo
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Checkout repository privata codice
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -40,128 +40,51 @@ jobs:
           rm -rf .runtime_output
           mkdir -p .runtime_output
 
-      - name: Esegui pipeline con CF interno, cliente_id pubblico e mappa privata
+      - name: Esegui pipeline Monte Carlo completa con CF
         env:
           PIPELINE_DB_CONFIG_JSON: ${{ secrets.PIPELINE_DB_CONFIG_JSON }}
           PIPELINE_DB_HOST: ${{ secrets.PIPELINE_DB_HOST }}
           PIPELINE_DB_USER: ${{ secrets.PIPELINE_DB_USER }}
           PIPELINE_DB_PASSWORD: ${{ secrets.PIPELINE_DB_PASSWORD }}
           PIPELINE_DB_PORT: ${{ secrets.PIPELINE_DB_PORT }}
-          CLIENTE_ID_SALT: ${{ secrets.CLIENTE_ID_SALT }}
           PIPELINE_PROJECT_PATH: ${{ github.workspace }}
           PIPELINE_BASE_PATH: ${{ github.workspace }}/.runtime_output
           PIPELINE_MATRIX_FILE: ${{ github.workspace }}/Matrice_Compatibilita_Esiti_Calcio_v1_0.xlsx
           PIPELINE_INCLUDE_CF: "true"
-          PIPELINE_SAVE_PRIVATE_CF_OUTPUT: "true"
           PIPELINE_DES_STATO: "VENDUTO"
           PIPELINE_GIORNI_BACK: "60"
           PIPELINE_N_SIM: "500"
         run: |
           python master_pepiline_concessionari.py
 
-      - name: Crea output pubblico cliente_id se manca
-        env:
-          CLIENTE_ID_SALT: ${{ secrets.CLIENTE_ID_SALT }}
-        run: |
-          python - <<'PY'
-          import hashlib
-          import os
-          from pathlib import Path
-
-          import pandas as pd
-
-          base = Path(".runtime_output")
-
-          file_pubblico = base / "13_concessionari_montecarlo_nomecommerciale_cliente_id.csv"
-          file_cf = base / "13_concessionari_montecarlo_nomecommerciale_cf.csv"
-          file_mappa = base / "output_privato" / "mappa_cliente_id_codice_fiscale.csv"
-
-          if file_pubblico.exists():
-              print(f"File pubblico già presente: {file_pubblico}")
-              raise SystemExit(0)
-
-          if not file_cf.exists():
-              raise SystemExit(f"File sorgente mancante: {file_cf}")
-
-          df = pd.read_csv(file_cf, sep=";", dtype=str).fillna("")
-          df.columns = [str(c).strip() for c in df.columns]
-
-          colonne_lower = {c.lower(): c for c in df.columns}
-
-          if "cliente_id" not in colonne_lower:
-              col_cf = colonne_lower.get("codice_fiscale") or colonne_lower.get("cf")
-
-              if not col_cf:
-                  raise SystemExit("Impossibile creare cliente_id: manca codice_fiscale/cf nel file sorgente.")
-
-              mappa = {}
-
-              if file_mappa.exists():
-                  map_df = pd.read_csv(file_mappa, sep=";", dtype=str).fillna("")
-                  map_df.columns = [str(c).strip() for c in map_df.columns]
-                  map_cols = {c.lower(): c for c in map_df.columns}
-
-                  map_col_cf = map_cols.get("codice_fiscale") or map_cols.get("cf")
-                  map_col_cliente = map_cols.get("cliente_id")
-
-                  if map_col_cf and map_col_cliente:
-                      mappa = dict(
-                          zip(
-                              map_df[map_col_cf].astype(str).str.strip().str.upper(),
-                              map_df[map_col_cliente].astype(str).str.strip(),
-                          )
-                      )
-
-              salt = os.getenv("CLIENTE_ID_SALT", "").strip()
-
-              def genera_cliente_id(cf: str) -> str:
-                  cf = str(cf).strip().upper()
-                  if not cf:
-                      return ""
-                  if cf in mappa and mappa[cf]:
-                      return mappa[cf]
-                  return "CL_" + hashlib.sha256((salt + cf).encode("utf-8")).hexdigest()[:16]
-
-              df["cliente_id"] = df[col_cf].apply(genera_cliente_id)
-
-          colonne_da_rimuovere = {
-              "codice_fiscale",
-              "cf",
-              "id_ticket",
-              "ticket_key",
-          }
-
-          df = df[
-              [
-                  c for c in df.columns
-                  if str(c).strip().lower() not in colonne_da_rimuovere
-              ]
-          ].copy()
-
-          if "cliente_id" not in {c.lower() for c in df.columns}:
-              raise SystemExit("Errore: cliente_id non creato nel file pubblico.")
-
-          file_pubblico.parent.mkdir(parents=True, exist_ok=True)
-          df.to_csv(file_pubblico, sep=";", index=False, encoding="utf-8-sig")
-
-          print(f"Creato file pubblico: {file_pubblico}")
-          print(f"Colonne finali: {list(df.columns)}")
-          PY
-
       - name: Controlla output richiesti
         run: |
           set -e
 
           files=(
+            ".runtime_output/1_concessionari_anagrafica_eventi.csv"
+            ".runtime_output/2_concessionari_ticket_eventi.csv"
+            ".runtime_output/3_concessionari_anagrafica_eventi_allineata.csv"
+            ".runtime_output/4_concessionari_ticket_eventi_allineato.csv"
+            ".runtime_output/4b_concessionari_ticket_eventi_compatibilita.csv"
+            ".runtime_output/9_concessionari_ticket_probabilistico.csv"
+            ".runtime_output/11_concessionari_montecarlo_simulazioni.csv"
             ".runtime_output/12_concessionari_montecarlo_statistiche.csv"
             ".runtime_output/13_concessionari_montecarlo_per_concessionario.csv"
             ".runtime_output/13_concessionari_montecarlo_per_nome_commerciale.csv"
-            ".runtime_output/13_concessionari_montecarlo_nomecommerciale_cliente_id.csv"
+            ".runtime_output/13_concessionari_montecarlo_nomecommerciale_cf.csv"
+            ".runtime_output/14_concessionari_top_ticket_rischio.csv"
+            ".runtime_output/15_concessionari_eventi_probabilita_drift.csv"
+            ".runtime_output/15b_concessionari_montecarlo_ticket_info_compatibilita.csv"
+            ".runtime_output/16_concessionari_ticket_incompatibili.csv"
+            ".runtime_output/17_concessionari_coppie_esiti_non_mappate.csv"
+            ".runtime_output/18_concessionari_riepilogo_compatibilita.csv"
+            ".runtime_output/19_concessionari_diagnostica_mapping_esiti.csv"
             ".runtime_output/20_concessionari_cluster_commerciali.csv"
             ".runtime_output/21_concessionari_cluster_summary.csv"
             ".runtime_output/16_top20_eventi_impatto_per_concessionario.csv"
             ".runtime_output/17_top20_eventi_impatto_per_nome_commerciale.csv"
-            ".runtime_output/output_privato/mappa_cliente_id_codice_fiscale.csv"
+            ".runtime_output/18_eventi_impatto_completo.csv"
           )
 
           for f in "${files[@]}"; do
@@ -173,103 +96,43 @@ jobs:
 
           echo "Tutti gli output richiesti sono presenti."
 
-      - name: Copia output privato CF nella repository privata
+      - name: Copia output completi nella cartella output
         run: |
-          mkdir -p output_privato
-          cp .runtime_output/output_privato/mappa_cliente_id_codice_fiscale.csv output_privato/
+          rm -rf output
+          mkdir -p output
+          cp .runtime_output/*.csv output/
 
-      - name: Commit output privato nella repository privata
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
-
-          git add -f output_privato/mappa_cliente_id_codice_fiscale.csv
-
-          git diff --cached --quiet && {
-            echo "Nessuna modifica privata da committare."
-            exit 0
-          }
-
-          git commit -m "Aggiornamento automatico mappa privata clienti"
-          git push
-
-      - name: Copia soltanto output pubblici autorizzati
-        run: |
-          rm -rf output_pubblici
-          mkdir -p output_pubblici
-
-          cp .runtime_output/12_concessionari_montecarlo_statistiche.csv output_pubblici/
-          cp .runtime_output/13_concessionari_montecarlo_per_concessionario.csv output_pubblici/
-          cp .runtime_output/13_concessionari_montecarlo_per_nome_commerciale.csv output_pubblici/
-          cp .runtime_output/13_concessionari_montecarlo_nomecommerciale_cliente_id.csv output_pubblici/
-          cp .runtime_output/20_concessionari_cluster_commerciali.csv output_pubblici/
-          cp .runtime_output/21_concessionari_cluster_summary.csv output_pubblici/
-          cp .runtime_output/16_top20_eventi_impatto_per_concessionario.csv output_pubblici/
-          cp .runtime_output/17_top20_eventi_impatto_per_nome_commerciale.csv output_pubblici/
-
-      - name: Conferma assenza dati sensibili negli output pubblici
+      - name: Verifica presenza codice fiscale
         run: |
           python - <<'PY'
           import pandas as pd
           from pathlib import Path
 
-          cartella = Path("output_pubblici")
+          file_cf = Path("output/13_concessionari_montecarlo_nomecommerciale_cf.csv")
 
-          colonne_vietate = {
-              "codice_fiscale",
-              "cf",
-              "id_ticket",
-              "ticket_key",
-          }
+          if not file_cf.exists():
+              raise SystemExit(f"File mancante: {file_cf}")
 
-          file_cliente = cartella / "13_concessionari_montecarlo_nomecommerciale_cliente_id.csv"
+          df = pd.read_csv(file_cf, sep=";", dtype=str)
+          colonne = {str(c).strip().lower() for c in df.columns}
 
-          if not file_cliente.exists():
-              raise SystemExit(f"Pubblicazione bloccata: manca {file_cliente}")
+          if "codice_fiscale" not in colonne and "cf" not in colonne:
+              raise SystemExit("Errore: nel file CF manca la colonna codice_fiscale/cf.")
 
-          for file in cartella.glob("*.csv"):
-              df = pd.read_csv(file, sep=";", dtype=str)
-              colonne = {str(c).strip().lower() for c in df.columns}
-              presenti = colonne_vietate.intersection(colonne)
-
-              if presenti:
-                  raise SystemExit(
-                      f"Pubblicazione bloccata: colonne vietate presenti in {file.name}: {sorted(presenti)}"
-                  )
-
-          df_cliente = pd.read_csv(file_cliente, sep=";", dtype=str)
-          colonne_cliente = {str(c).strip().lower() for c in df_cliente.columns}
-
-          if "cliente_id" not in colonne_cliente:
-              raise SystemExit("Pubblicazione bloccata: cliente_id assente nel file cliente pubblico.")
-
-          print("Verifica output pubblici superata: nessuna colonna sensibile trovata.")
+          print("Verifica superata: il file contiene il codice fiscale.")
           PY
 
-      - name: Checkout repository pubblica output
-        uses: actions/checkout@v4
-        with:
-          repository: albagammamarketing-source/output-63_montecarlo_pubblici
-          token: ${{ secrets.OUTPUT_REPO_TOKEN }}
-          path: repo_output_pubblico
-
-      - name: Pubblica CSV nella repository pubblica
+      - name: Commit output completi nella repository
         run: |
-          mkdir -p repo_output_pubblico/output
-          cp output_pubblici/*.csv repo_output_pubblico/output/
-
-          cd repo_output_pubblico
-
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
 
           git add -f output/*.csv
 
           git diff --cached --quiet && {
-            echo "Nessuna modifica pubblica da pubblicare."
+            echo "Nessuna modifica output da committare."
             exit 0
           }
 
-          git commit -m "Aggiornamento automatico output Monte Carlo pubblici"
+          git commit -m "Aggiornamento automatico output Monte Carlo completi"
           git push
-
