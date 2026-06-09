@@ -195,14 +195,12 @@ def stampa_file_attesi() -> None:
         "12_concessionari_montecarlo_statistiche.csv",
         "13_concessionari_montecarlo_per_concessionario.csv",
         "13_concessionari_montecarlo_per_nome_commerciale.csv",
-        "13_concessionari_montecarlo_nomecommerciale_cliente_id.csv",
         "14_concessionari_top_ticket_rischio.csv",
         "15_concessionari_eventi_probabilita_drift.csv",
         "16_top20_eventi_impatto_per_concessionario.csv",
         "17_top20_eventi_impatto_per_nome_commerciale.csv",
         "20_concessionari_cluster_commerciali.csv",
         "21_concessionari_cluster_summary.csv",
-        "output_privato/mappa_cliente_id_codice_fiscale.csv",
     ]
 
     for file in files:
