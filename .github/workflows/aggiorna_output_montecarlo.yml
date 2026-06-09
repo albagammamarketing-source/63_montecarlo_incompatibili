@@ -117,7 +117,7 @@ jobs:
           cp .runtime_output/17_top20_eventi_impatto_per_nome_commerciale.csv output/
           cp .runtime_output/18_eventi_impatto_completo.csv output/
 
-      - name: Verifica presenza codice fiscale
+      - name: Verifica file 13 CF aggiornato
         run: |
           python - <<'PY'
           import pandas as pd
@@ -128,13 +128,20 @@ jobs:
           if not file_cf.exists():
               raise SystemExit(f"File mancante: {file_cf}")
 
-          df = pd.read_csv(file_cf, sep=";", dtype=str)
-          colonne = {str(c).strip().lower() for c in df.columns}
+          df = pd.read_csv(file_cf, sep=";", dtype=str, nrows=5)
+          colonne = [str(c).strip() for c in df.columns]
+          colonne_lower = {c.lower() for c in colonne}
 
-          if "codice_fiscale" not in colonne and "cf" not in colonne:
+          print("Colonne trovate nel file 13 CF:")
+          print(colonne)
+
+          if "codice_fiscale" not in colonne_lower and "cf" not in colonne_lower:
               raise SystemExit("Errore: nel file CF manca la colonna codice_fiscale/cf.")
 
-          print("Verifica superata: il file contiene il codice fiscale.")
+          if "eventi_medi_giocati_cf" not in colonne_lower:
+              raise SystemExit("Errore: nel file CF manca la colonna eventi_medi_giocati_cf.")
+
+          print("Verifica superata: codice_fiscale ed eventi_medi_giocati_cf presenti.")
           PY
 
       - name: Mostra dimensione output
