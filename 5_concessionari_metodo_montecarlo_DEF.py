@@ -20,7 +20,7 @@ import re
 # =========================================================
 # VERSIONE
 # =========================================================
-SCRIPT_VERSION = "5_montecarlo_con_compatibilita_v3_eventi_medi_ticket_totali_cf"
+SCRIPT_VERSION = "5_montecarlo_con_compatibilita_v2_eventi_medi_cf"
 
 
 # =========================================================
@@ -33,10 +33,7 @@ BASE_PATH = Path(
     )
 )
 
-# Input preferito: file prodotto dallo script 3b.
 FILE_TICKET_COMPAT = BASE_PATH / "4b_concessionari_ticket_eventi_compatibilita.csv"
-
-# Fallback: file allineato prodotto dallo script 2.
 FILE_TICKET_FALLBACK = BASE_PATH / "4_concessionari_ticket_eventi_allineato.csv"
 
 OUT_TICKET_PROB = BASE_PATH / "9_concessionari_ticket_probabilistico.csv"
@@ -69,7 +66,6 @@ SHOCK_FACTOR = 1.10
 PROB_MIN = 0.000001
 PROB_MAX = 0.999999
 
-# Se True, i ticket con flag_escludi_montecarlo=1 non possono vincere in nessuna iterazione.
 ESCLUDI_INCOMPATIBILI_DA_MONTECARLO = True
 
 
@@ -272,9 +268,7 @@ def leggi_ticket() -> pd.DataFrame:
 
     df["quota_evento"] = converti_numero_italiano(df["quota_evento"])
     df["importo_pagato"] = converti_numero_italiano(df["importo_pagato"])
-    df["importo_vincita_potenziale"] = converti_numero_italiano(
-        df["importo_vincita_potenziale"]
-    )
+    df["importo_vincita_potenziale"] = converti_numero_italiano(df["importo_vincita_potenziale"])
 
     print("Quote valide:", df["quota_evento"].notna().sum())
     print("Quote > 1:", (df["quota_evento"] > 1).sum())
@@ -317,7 +311,10 @@ def leggi_ticket() -> pd.DataFrame:
         axis=1
     )
 
-    print(f"Ticket esclusi da compatibilità: {df[['concessionario', 'id_ticket', 'flag_escludi_montecarlo']].drop_duplicates()['flag_escludi_montecarlo'].sum()}")
+    print(
+        "Ticket esclusi da compatibilità: "
+        f"{df[['concessionario', 'id_ticket', 'flag_escludi_montecarlo']].drop_duplicates()['flag_escludi_montecarlo'].sum()}"
+    )
 
     if not df.empty:
         print("\nDistribuzione compatibilita_ticket:")
@@ -631,8 +628,6 @@ def esegui_montecarlo(ticket_info, ticket_eventi, evento_prob):
             for idxs in ticket_event_idx
         ])
 
-        # Applicazione operativa del controllo compatibilità:
-        # i ticket incompatibili non possono vincere in nessuna simulazione.
         ticket_vincenti_mask = ticket_vincenti_mask & (flag_escludi == 0)
 
         payout_vincenti = payout_ticket * ticket_vincenti_mask
@@ -799,14 +794,6 @@ def crea_statistiche_per_nomecommerciale_cf(
     df_sim_comm_cf: pd.DataFrame,
     ticket_info: pd.DataFrame
 ) -> pd.DataFrame:
-    """
-    Crea il riepilogo Monte Carlo per concessionario + nome_commerciale + codice_fiscale.
-
-    Colonne aggiunte:
-    - eventi_medi_giocati_cf: numero medio di eventi giocati per ticket dal CF.
-    - ticket_totali_cf: numero totale di ticket del CF nel perimetro Monte Carlo.
-    - eventi_totali_giocati_cf: somma totale degli eventi giocati dal CF.
-    """
     if df_sim_comm_cf.empty:
         return pd.DataFrame()
 
@@ -829,39 +816,8 @@ def crea_statistiche_per_nomecommerciale_cf(
         .reset_index()
     )
 
-    # ticket_info contiene una riga per ticket modelizzato in Monte Carlo.
-    # La colonna n_eventi indica quanti eventi compongono il ticket.
     ticket_cf = ticket_info.copy()
-
-    colonne_richieste = {
-        "concessionario",
-        "nome_commerciale",
-        "codice_fiscale",
-        "n_eventi",
-    }
-
-    if not colonne_richieste.issubset(ticket_cf.columns):
-        out["eventi_medi_giocati_cf"] = 0.0
-        out["ticket_totali_cf"] = 0
-        out["eventi_totali_giocati_cf"] = 0
-        return out.sort_values(
-            by=["payout_p95", "payout_medio"],
-            ascending=False
-        ).reset_index(drop=True)
-
-    if "ticket_key" not in ticket_cf.columns:
-        if "id_ticket" in ticket_cf.columns:
-            ticket_cf["ticket_key"] = (
-                ticket_cf["concessionario"].astype(str) + "||" +
-                ticket_cf["id_ticket"].astype(str)
-            )
-        else:
-            ticket_cf["ticket_key"] = ticket_cf.index.astype(str)
-
-    ticket_cf["n_eventi"] = pd.to_numeric(
-        ticket_cf["n_eventi"],
-        errors="coerce"
-    ).fillna(0)
+    ticket_cf["n_eventi"] = pd.to_numeric(ticket_cf["n_eventi"], errors="coerce")
 
     eventi_medi_cf = (
         ticket_cf.groupby(
@@ -870,28 +826,13 @@ def crea_statistiche_per_nomecommerciale_cf(
         )
         .agg(
             eventi_medi_giocati_cf=("n_eventi", "mean"),
-            ticket_totali_cf=("ticket_key", "nunique"),
-            eventi_totali_giocati_cf=("n_eventi", "sum"),
         )
         .reset_index()
     )
 
     eventi_medi_cf["eventi_medi_giocati_cf"] = (
         pd.to_numeric(eventi_medi_cf["eventi_medi_giocati_cf"], errors="coerce")
-        .fillna(0)
         .round(2)
-    )
-
-    eventi_medi_cf["ticket_totali_cf"] = (
-        pd.to_numeric(eventi_medi_cf["ticket_totali_cf"], errors="coerce")
-        .fillna(0)
-        .astype(int)
-    )
-
-    eventi_medi_cf["eventi_totali_giocati_cf"] = (
-        pd.to_numeric(eventi_medi_cf["eventi_totali_giocati_cf"], errors="coerce")
-        .fillna(0)
-        .astype(int)
     )
 
     out = out.merge(
@@ -900,30 +841,10 @@ def crea_statistiche_per_nomecommerciale_cf(
         how="left"
     )
 
-    for col in [
-        "eventi_medi_giocati_cf",
-        "ticket_totali_cf",
-        "eventi_totali_giocati_cf",
-    ]:
-        if col not in out.columns:
-            out[col] = 0
-
     out["eventi_medi_giocati_cf"] = (
         pd.to_numeric(out["eventi_medi_giocati_cf"], errors="coerce")
         .fillna(0)
         .round(2)
-    )
-
-    out["ticket_totali_cf"] = (
-        pd.to_numeric(out["ticket_totali_cf"], errors="coerce")
-        .fillna(0)
-        .astype(int)
-    )
-
-    out["eventi_totali_giocati_cf"] = (
-        pd.to_numeric(out["eventi_totali_giocati_cf"], errors="coerce")
-        .fillna(0)
-        .astype(int)
     )
 
     return out.sort_values(
@@ -1007,6 +928,7 @@ def main():
         eventi_out[col] = pd.to_numeric(eventi_out[col], errors="coerce").round(6)
 
     ticket_info_out = ticket_info.copy()
+
     for col in ["importo_pagato", "importo_vincita_potenziale", "fattore_correzione_prob"]:
         ticket_info_out[col] = pd.to_numeric(ticket_info_out[col], errors="coerce").round(6)
 
