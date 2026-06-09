@@ -52,8 +52,8 @@ jobs:
           PIPELINE_MATRIX_FILE: ${{ github.workspace }}/Matrice_Compatibilita_Esiti_Calcio_v1_0.xlsx
           PIPELINE_INCLUDE_CF: "true"
           PIPELINE_DES_STATO: "VENDUTO"
-          PIPELINE_GIORNI_BACK: "60"
-          PIPELINE_N_SIM: "500"
+          PIPELINE_GIORNI_BACK: "270"
+          PIPELINE_N_SIM: "5000"
         run: |
           python master_pepiline_concessionari.py
 
