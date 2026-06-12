@@ -53,7 +53,7 @@ jobs:
           PIPELINE_INCLUDE_CF: "true"
           PIPELINE_DES_STATO: "VENDUTO"
           PIPELINE_GIORNI_BACK: "270"
-          PIPELINE_N_SIM: "5000"
+          PIPELINE_N_SIM: "2000"
         run: |
           python master_pepiline_concessionari.py
 
@@ -108,7 +108,6 @@ jobs:
           cp .runtime_output/15_concessionari_eventi_probabilita_drift.csv output/
           cp .runtime_output/15b_concessionari_montecarlo_ticket_info_compatibilita.csv output/
           cp .runtime_output/16_concessionari_ticket_incompatibili.csv output/
-          cp .runtime_output/17_concessionari_coppie_esiti_non_mappate.csv output/
           cp .runtime_output/18_concessionari_riepilogo_compatibilita.csv output/
           cp .runtime_output/19_concessionari_diagnostica_mapping_esiti.csv output/
           cp .runtime_output/20_concessionari_cluster_commerciali.csv output/
@@ -116,6 +115,13 @@ jobs:
           cp .runtime_output/16_top20_eventi_impatto_per_concessionario.csv output/
           cp .runtime_output/17_top20_eventi_impatto_per_nome_commerciale.csv output/
           cp .runtime_output/18_eventi_impatto_completo.csv output/
+
+          echo "File 17_concessionari_coppie_esiti_non_mappate.csv NON copiato in output perché supera il limite GitHub da 100 MB."
+
+      - name: Rimuovi eventuale file 17 grande già presente nel repository
+        run: |
+          rm -f output/17_concessionari_coppie_esiti_non_mappate.csv
+          git rm --cached -f output/17_concessionari_coppie_esiti_non_mappate.csv || true
 
       - name: Verifica file 13 CF aggiornato
         run: |
