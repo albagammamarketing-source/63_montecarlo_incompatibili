@@ -111,6 +111,39 @@ def verifica_campi_compatibilita(ticket_eventi_out: pd.DataFrame) -> None:
         print("✅ Campi compatibilità conservati nel CSV ticket allineato")
 
 
+def escludi_ticket_con_lo(ticket_eventi_out: pd.DataFrame) -> pd.DataFrame:
+    """Esclude tutte le righe di ogni (concessionario, id_ticket) con un evento LO."""
+    col_stato_esito = trova_colonna(ticket_eventi_out, ["cod_stato_esito"])
+    if col_stato_esito is None:
+        raise ValueError(
+            f"{INPUT_TICKET_EVENTI.name}: manca 'cod_stato_esito'. "
+            "Impossibile verificare i ticket gia' persi: riesegui lo script 1."
+        )
+
+    chiavi = ["concessionario", "id_ticket"]
+    if not ticket_eventi_out.empty and ticket_eventi_out[chiavi].eq("").any().any():
+        raise ValueError(
+            f"{INPUT_TICKET_EVENTI.name}: presenti concessionario o id_ticket vuoti; "
+            "impossibile applicare il filtro LO in modo sicuro."
+        )
+
+    stato = ticket_eventi_out[col_stato_esito].astype(str).str.strip().str.upper()
+    chiavi_lo = pd.MultiIndex.from_frame(
+        ticket_eventi_out.loc[stato.eq("LO"), chiavi].drop_duplicates()
+    )
+    chiavi_righe = pd.MultiIndex.from_frame(ticket_eventi_out[chiavi])
+    righe_da_escludere = chiavi_righe.isin(chiavi_lo)
+
+    ticket_prima = ticket_eventi_out[chiavi].drop_duplicates().shape[0]
+    ticket_rimasti = ticket_prima - len(chiavi_lo)
+    print(f"Ticket prima controllo LO: {ticket_prima}")
+    print(f"Ticket contenenti almeno un LO: {len(chiavi_lo)}")
+    print(f"Righe ticket-eventi escluse: {int(righe_da_escludere.sum())}")
+    print(f"Ticket rimasti per l'analisi: {ticket_rimasti}")
+
+    return ticket_eventi_out.loc[~righe_da_escludere].copy().reset_index(drop=True)
+
+
 # =========================================================
 # LETTURA FILE BASE
 # =========================================================
@@ -209,6 +242,10 @@ def leggi_file_base():
         ticket_eventi_out[col_num_evento] = (
             ticket_eventi_out[col_num_evento].astype(str).str.strip()
         )
+
+    # Un solo evento gia' perso azzera l'esposizione dell'intera multipla.
+    # La chiave include il concessionario per evitare collisioni tra id_ticket.
+    ticket_eventi_out = escludi_ticket_con_lo(ticket_eventi_out)
 
     # Normalizza i campi del controllo compatibilità se presenti nel file 2.
     for nome, col in colonne_compat_presenti.items():
