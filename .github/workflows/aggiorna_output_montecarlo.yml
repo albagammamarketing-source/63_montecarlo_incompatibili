@@ -53,7 +53,7 @@ jobs:
           PIPELINE_INCLUDE_CF: "true"
           PIPELINE_DES_STATO: "VENDUTO"
           PIPELINE_GIORNI_BACK: "270"
-          PIPELINE_N_SIM: "2000"
+          PIPELINE_N_SIM: "1000"
         run: |
           python master_pepiline_concessionari.py
 
