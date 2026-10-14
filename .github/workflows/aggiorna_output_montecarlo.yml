@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: montecarlo-output-main
+  cancel-in-progress: false
+
 jobs:
   genera-output:
     runs-on: ubuntu-latest
@@ -92,36 +96,38 @@ jobs:
 
           echo "Tutti gli output finali richiesti sono presenti."
 
-      - name: Copia output finali nella cartella output
+      - name: Pubblica solo CSV entro limite GitHub
+        shell: bash
         run: |
-          rm -rf output
+          set -euo pipefail
           mkdir -p output
+          # Evita che i file pubblicati nella run precedente restino obsoleti.
+          find output -maxdepth 1 -type f -name '*.csv' -delete
 
-          cp .runtime_output/9_concessionari_ticket_probabilistico.csv output/
-          cp .runtime_output/10_concessionari_riepilogo_probabilistico_per_nome_commerciale.csv output/
-          cp .runtime_output/11_concessionari_montecarlo_simulazioni.csv output/
-          cp .runtime_output/12_concessionari_montecarlo_statistiche.csv output/
-          cp .runtime_output/13_concessionari_montecarlo_per_concessionario.csv output/
-          cp .runtime_output/13_concessionari_montecarlo_per_nome_commerciale.csv output/
-          cp .runtime_output/13_concessionari_montecarlo_nomecommerciale_cf.csv output/
-          cp .runtime_output/14_concessionari_top_ticket_rischio.csv output/
-          cp .runtime_output/15_concessionari_eventi_probabilita_drift.csv output/
-          cp .runtime_output/15b_concessionari_montecarlo_ticket_info_compatibilita.csv output/
-          cp .runtime_output/16_concessionari_ticket_incompatibili.csv output/
-          cp .runtime_output/18_concessionari_riepilogo_compatibilita.csv output/
-          cp .runtime_output/19_concessionari_diagnostica_mapping_esiti.csv output/
-          cp .runtime_output/20_concessionari_cluster_commerciali.csv output/
-          cp .runtime_output/21_concessionari_cluster_summary.csv output/
-          cp .runtime_output/16_top20_eventi_impatto_per_concessionario.csv output/
-          cp .runtime_output/17_top20_eventi_impatto_per_nome_commerciale.csv output/
-          cp .runtime_output/18_eventi_impatto_completo.csv output/
-
-          echo "File 17_concessionari_coppie_esiti_non_mappate.csv NON copiato in output perché supera il limite GitHub da 100 MB."
-
-      - name: Rimuovi eventuale file 17 grande già presente nel repository
-        run: |
-          rm -f output/17_concessionari_coppie_esiti_non_mappate.csv
-          git rm --cached -f output/17_concessionari_coppie_esiti_non_mappate.csv || true
+          # Limite prudenziale: 90 MiB (GitHub blocca file >100 MiB circa).
+          MAX_BYTES=$((90 * 1024 * 1024))
+          for src in .runtime_output/*.csv; do
+            [ -f "$src" ] || continue
+            filename="$(basename "$src")"
+            # File interno molto grande, già escluso dal workflow originario.
+            if [[ "$filename" == "17_concessionari_coppie_esiti_non_mappate.csv" ]]; then
+              echo "SKIP (diagnostico interno): $filename"
+              continue
+            fi
+            size="$(stat -c%s "$src")"
+            if (( size > MAX_BYTES )); then
+              echo "SKIP (>90 MiB): $filename ($size bytes)"
+              continue
+            fi
+            # I primi file tecnici (1-4b) non sono dashboard pubbliche.
+            case "$filename" in
+              1_concessionari_*|2_concessionari_*|3_concessionari_*|4_concessionari_*|4b_concessionari_*) continue ;;
+            esac
+            cp -- "$src" "output/$filename"
+            echo "OK: $filename ($size bytes)"
+          done
+          echo "Output pubblicabili:"
+          ls -lh output/ || true
 
       - name: Verifica file 13 CF aggiornato
         run: |
@@ -129,7 +135,7 @@ jobs:
           import pandas as pd
           from pathlib import Path
 
-          file_cf = Path("output/13_concessionari_montecarlo_nomecommerciale_cf.csv")
+          file_cf = Path(".runtime_output/13_concessionari_montecarlo_nomecommerciale_cf.csv")
 
           if not file_cf.exists():
               raise SystemExit(f"File mancante: {file_cf}")
@@ -160,7 +166,13 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
 
-          git add -f output/*.csv
+          # Stage additions plus deletions of previously tracked oversized CSVs.
+          shopt -s nullglob
+          candidates=(output/*.csv)
+          if (( ${#candidates[@]} )); then
+            git add -f "${candidates[@]}"
+          fi
+          git add -u -- output/
 
           git diff --cached --quiet && {
             echo "Nessuna modifica output da committare."
