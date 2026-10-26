@@ -3,7 +3,7 @@ name: Aggiorna output Monte Carlo
 on:
   workflow_dispatch:
   schedule:
-    - cron: "20 */3 * * *"
+    - cron: "20 */8 * * *"
 
 permissions:
   contents: write
