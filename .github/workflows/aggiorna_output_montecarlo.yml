@@ -180,4 +180,11 @@ jobs:
           }
 
           git commit -m "Aggiornamento automatico output Monte Carlo finali"
-          git push
+
+          # Un'esecuzione precedente può aver già pubblicato: riallinea e riprova.
+          for i in 1 2 3 4; do
+            git pull --rebase -X theirs origin "${GITHUB_REF_NAME}" && git push && exit 0
+            echo "Push fallito (tentativo $i), riprovo..."
+            sleep $((i * 5))
+          done
+          exit 1
