@@ -39,6 +39,31 @@ jobs:
             exit 1
           }
 
+      - name: Aggiungi swap di sicurezza
+        # Con l'aumento dei ticket la RAM del runner può non bastare e GitHub
+        # termina il job ("runner has received a shutdown signal").
+        # Lo swap aggiuntivo evita il crash; lascia comunque spazio su disco per i CSV.
+        run: |
+          echo "Prima:"; free -h; df -h / /mnt 2>/dev/null || true
+          target=/swapfile_pipeline
+          if [ -d /mnt ] && [ "$(df --output=avail -BG /mnt | tail -1 | tr -dc 0-9)" -gt "$(df --output=avail -BG / | tail -1 | tr -dc 0-9)" ]; then
+            target=/mnt/swapfile_pipeline
+          fi
+          avail=$(df --output=avail -BG "$(dirname "$target")" | tail -1 | tr -dc 0-9)
+          size=$(( avail - 25 ))
+          if [ "$size" -gt 12 ]; then size=12; fi
+          if [ "$size" -ge 2 ]; then
+            sudo fallocate -l "${size}G" "$target" \
+              && sudo chmod 600 "$target" \
+              && sudo mkswap "$target" >/dev/null \
+              && sudo swapon "$target" \
+              && echo "Swap aggiuntivo: ${size}G su $target" \
+              || echo "Swap aggiuntivo non creato, proseguo."
+          else
+            echo "Spazio disco insufficiente per swap aggiuntivo, proseguo."
+          fi
+          echo "Dopo:"; free -h
+
       - name: Prepara cartella runtime
         run: |
           rm -rf .runtime_output

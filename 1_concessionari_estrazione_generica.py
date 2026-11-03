@@ -13,9 +13,13 @@ except ImportError:
     print("Libreria mancante: pymysql")
     raise
 
+import gc
 import json
 import os
 from pathlib import Path
+from typing import Iterator
+
+from pandas.api.types import union_categoricals
 
 
 # =========================================================
@@ -32,7 +36,11 @@ BASE_PATH.mkdir(parents=True, exist_ok=True)
 OUTPUT_ANAG_CSV = BASE_PATH / "1_concessionari_anagrafica_eventi.csv"
 OUTPUT_TICKET_EVENTI_CSV = BASE_PATH / "2_concessionari_ticket_eventi.csv"
 
-DB_PORT = int(os.getenv("PIPELINE_DB_PORT", "3306"))
+DB_PORT = int(os.getenv("PIPELINE_DB_PORT", "3306") or "3306")
+
+# Righe lette dal DB per blocco: evita di tenere in memoria tutto il risultato
+# della query come lista di dizionari Python (causa del crash per memoria).
+CHUNK_ROWS = int(os.getenv("PIPELINE_DB_CHUNK_ROWS", "200000") or "200000")
 DES_STATO = os.getenv("PIPELINE_DES_STATO", "VENDUTO").strip()
 NOME_COMMERCIALE = os.getenv("PIPELINE_NOME_COMMERCIALE", "").strip() or None
 GIORNI_BACK = int(os.getenv("PIPELINE_GIORNI_BACK", "120"))
@@ -145,7 +153,8 @@ STRING_COLUMNS = [
 # =========================================================
 # DB
 # =========================================================
-def esegui_query(concessionario: str, cfg: dict) -> pd.DataFrame:
+def leggi_query_a_blocchi(concessionario: str, cfg: dict) -> Iterator[pd.DataFrame]:
+    """Legge il risultato della query a blocchi con cursore lato server."""
     conn = pymysql.connect(
         host=cfg["host"],
         port=DB_PORT,
@@ -153,7 +162,7 @@ def esegui_query(concessionario: str, cfg: dict) -> pd.DataFrame:
         password=cfg["password"],
         database=cfg["database"],
         charset="utf8mb4",
-        cursorclass=pymysql.cursors.DictCursor,
+        cursorclass=pymysql.cursors.SSCursor,
     )
 
     try:
@@ -228,9 +237,13 @@ def esegui_query(concessionario: str, cfg: dict) -> pd.DataFrame:
 
         with conn.cursor() as cur:
             cur.execute(query, [concessionario] + params)
-            rows = cur.fetchall()
+            colonne = [d[0] for d in cur.description]
 
-        return pd.DataFrame(rows)
+            while True:
+                rows = cur.fetchmany(CHUNK_ROWS)
+                if not rows:
+                    break
+                yield pd.DataFrame.from_records(rows, columns=colonne)
 
     finally:
         conn.close()
@@ -325,15 +338,67 @@ def converti_valori_numerici(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def scrivi_csv(df: pd.DataFrame, path_file: Path) -> None:
+def scrivi_csv(df: pd.DataFrame, path_file: Path, append: bool = False) -> None:
+    """Scrive il CSV; con append=True accoda senza header e senza un secondo BOM."""
     df.to_csv(
         path_file,
         sep=";",
         index=False,
-        encoding="utf-8-sig",
-        header=True,
+        encoding="utf-8" if append else "utf-8-sig",
+        header=not append,
         decimal=",",
+        mode="a" if append else "w",
     )
+
+
+# Colonne mantenute dopo la preparazione di ogni blocco (le colonne grezze
+# importo_*_eur e quota non servono più dopo la conversione).
+COLONNE_LAVORO = [c for c in TICKET_COLUMNS if c != "id_evento"]
+COLONNE_NUMERICHE = ["quota_evento", "importo_pagato", "importo_vincita_potenziale"]
+
+
+def prepara_blocco(df: pd.DataFrame) -> pd.DataFrame:
+    """Pulizia di un blocco letto dal DB, poi compattazione in categorie.
+
+    Le colonne testuali sono molto ripetitive: in formato category occupano
+    una frazione della memoria degli oggetti stringa.
+    """
+    df.columns = [str(c).strip() for c in df.columns]
+
+    df = normalizza_colonne_stringa(df, STRING_COLUMNS)
+    df = costruisci_evento_descrizione(df)
+    df = converti_valori_numerici(df)
+
+    df = df.loc[
+        (df["concessionario"] != "") &
+        (df["id_ticket"] != "") &
+        (df["evento_descrizione"] != "") &
+        (df["data_ora_vend"] != ""),
+        COLONNE_LAVORO,
+    ].reset_index(drop=True)
+
+    for col in COLONNE_LAVORO:
+        if col not in COLONNE_NUMERICHE:
+            df[col] = df[col].astype(str).astype("category")
+
+    return df
+
+
+def concatena_blocchi(blocchi: list[pd.DataFrame]) -> pd.DataFrame:
+    """Concatena blocchi mantenendo le colonne in formato category."""
+    if len(blocchi) == 1:
+        return blocchi[0]
+
+    dati = {}
+    for col in blocchi[0].columns:
+        if isinstance(blocchi[0][col].dtype, pd.CategoricalDtype):
+            dati[col] = union_categoricals(
+                [b[col] for b in blocchi], sort_categories=True
+            )
+        else:
+            dati[col] = pd.concat([b[col] for b in blocchi], ignore_index=True)
+
+    return pd.DataFrame(dati)
 
 
 def crea_output_vuoti() -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -346,7 +411,16 @@ def crea_output_vuoti() -> tuple[pd.DataFrame, pd.DataFrame]:
 # =========================================================
 # COSTRUZIONE OUTPUT
 # =========================================================
-def costruisci_output(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def costruisci_output(
+    df: pd.DataFrame, offset_id_evento: int = 0
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Costruisce anagrafica eventi e ticket-eventi.
+
+    Va chiamata un concessionario alla volta, in ordine alfabetico di
+    concessionario: gli id_evento proseguono da offset_id_evento, quindi il
+    risultato complessivo è identico a quello calcolato su tutti i dati insieme
+    (entrambi i file sono ordinati prima per concessionario).
+    """
     if df.empty:
         return crea_output_vuoti()
 
@@ -368,66 +442,24 @@ def costruisci_output(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
         .reset_index(drop=True)
     )
 
-    anag["id_evento"] = [f"E{i + 1}" for i in range(len(anag))]
+    anag["id_evento"] = [
+        f"E{offset_id_evento + i + 1}" for i in range(len(anag))
+    ]
     anag["stato_evento_input"] = ""
 
-    anag_out = anag[
-        [
-            "concessionario",
-            "id_evento",
-            "des_sport",
-            "des_manif",
-            "des_avv",
-            "des_scom",
-            "des_eve",
-            "des_vin",
-            "evento_descrizione",
-            "stato_evento_input",
-        ]
-    ].copy()
+    anag_out = anag.reindex(columns=ANAG_COLUMNS)
 
-    anag_out = anag_out.reindex(columns=ANAG_COLUMNS)
-
-    mappa_eventi = anag_out[
-        [
-            "concessionario",
-            "evento_descrizione",
-            "id_evento",
-        ]
-    ].copy()
-
-    ticket = df.merge(
-        mappa_eventi,
-        on=["concessionario", "evento_descrizione"],
-        how="left",
+    mappa_eventi = dict(
+        zip(
+            anag_out["evento_descrizione"].astype(str),
+            anag_out["id_evento"],
+        )
     )
 
-    ticket_out = ticket[
-        [
-            "concessionario",
-            "id_ticket",
-            "nome_commerciale",
-            "codice_fiscale",
-            "num_evento",
-            "des_stato",
-            "data_ora_vend",
-            "id_evento",
-            "evento_descrizione",
-            "des_sport",
-            "des_manif",
-            "des_avv",
-            "des_scom",
-            "des_eve",
-            "des_vin",
-            "match_key",
-            "esito_key_matrice",
-            "quota_evento",
-            "cod_stato_esito",
-            "importo_pagato",
-            "importo_vincita_potenziale",
-        ]
-    ].copy()
-
+    ticket_out = df.copy()
+    ticket_out["id_evento"] = (
+        ticket_out["evento_descrizione"].astype(str).map(mappa_eventi)
+    )
     ticket_out = ticket_out.reindex(columns=TICKET_COLUMNS)
 
     ticket_out = ticket_out.sort_values(
@@ -472,73 +504,85 @@ def main():
             f"ultimi {GIORNI_BACK} giorni"
         )
 
-    frames = []
+    print(f"Lettura a blocchi di {CHUNK_ROWS} righe")
 
-    for concessionario, cfg in DB_CONFIGS.items():
+    # Ordine alfabetico: l'output è ordinato per concessionario, quindi
+    # elaborare un concessionario alla volta dà lo stesso risultato finale.
+    righe_lette_totali = 0
+    concessionari_validi = 0
+    eventi_totali = 0
+    righe_ticket_totali = 0
+    ticket_unici_totali = 0
+    file_iniziati = False
+    ticket_out = pd.DataFrame(columns=TICKET_COLUMNS)
+
+    for concessionario in sorted(DB_CONFIGS):
+        cfg = DB_CONFIGS[concessionario]
         print(f"Lettura dati da DB concessionario: {concessionario} ({cfg['database']})")
 
+        blocchi = []
+        righe_lette = 0
+
         try:
-            df_part = esegui_query(concessionario, cfg)
-
-            if df_part.empty:
-                print(f"  -> {concessionario}: nessun dato trovato")
-                continue
-
-            print(f"  -> {concessionario}: righe lette {len(df_part)}")
-            frames.append(df_part)
-
+            for blocco in leggi_query_a_blocchi(concessionario, cfg):
+                righe_lette += len(blocco)
+                blocchi.append(prepara_blocco(blocco))
+                del blocco
         except Exception as ex:
             print(f"  -> {concessionario}: ERRORE {ex}")
+            del blocchi
+            gc.collect()
+            continue
 
-    if not frames:
+        if righe_lette == 0:
+            print(f"  -> {concessionario}: nessun dato trovato")
+            continue
+
+        print(f"  -> {concessionario}: righe lette {righe_lette}")
+        righe_lette_totali += righe_lette
+
+        df = concatena_blocchi(blocchi)
+        del blocchi
+        gc.collect()
+
+        if df.empty:
+            continue
+
+        anag_out, ticket_out = costruisci_output(df, offset_id_evento=eventi_totali)
+        del df
+
+        scrivi_csv(anag_out, OUTPUT_ANAG_CSV, append=file_iniziati)
+        scrivi_csv(ticket_out, OUTPUT_TICKET_EVENTI_CSV, append=file_iniziati)
+        file_iniziati = True
+
+        concessionari_validi += 1
+        eventi_totali += len(anag_out)
+        righe_ticket_totali += len(ticket_out)
+        ticket_unici_totali += ticket_out["id_ticket"].nunique()
+
+        del anag_out
+        gc.collect()
+
+    if righe_lette_totali == 0:
         print("⚠ Nessun dato trovato su tutti i concessionari")
 
-        anag_vuota, ticket_vuoto = crea_output_vuoti()
-        scrivi_csv(anag_vuota, OUTPUT_ANAG_CSV)
-        scrivi_csv(ticket_vuoto, OUTPUT_TICKET_EVENTI_CSV)
-
-        return
-
-    df = pd.concat(frames, ignore_index=True)
-
-    df.columns = [str(c).strip() for c in df.columns]
-
-    df = normalizza_colonne_stringa(df, STRING_COLUMNS)
-    df = costruisci_evento_descrizione(df)
-    df = converti_valori_numerici(df)
-
-    df = df[
-        (df["concessionario"] != "") &
-        (df["id_ticket"] != "") &
-        (df["evento_descrizione"] != "") &
-        (df["data_ora_vend"] != "")
-    ].copy()
-
-    if df.empty:
+    elif not file_iniziati:
         print("⚠ Nessuna riga valida dopo pulizia")
 
+    if not file_iniziati:
         anag_vuota, ticket_vuoto = crea_output_vuoti()
         scrivi_csv(anag_vuota, OUTPUT_ANAG_CSV)
         scrivi_csv(ticket_vuoto, OUTPUT_TICKET_EVENTI_CSV)
-
         return
-
-    anag_out, ticket_out = costruisci_output(df)
-
-    scrivi_csv(anag_out, OUTPUT_ANAG_CSV)
-    scrivi_csv(ticket_out, OUTPUT_TICKET_EVENTI_CSV)
 
     print("\n✅ FILE CREATI:")
     print(OUTPUT_ANAG_CSV)
     print(OUTPUT_TICKET_EVENTI_CSV)
 
-    print(f"\nConcessionari presenti: {df['concessionario'].nunique()}")
-    print(f"Eventi unici: {len(anag_out)}")
-    print(f"Righe ticket-eventi: {len(ticket_out)}")
-    print(
-        "Ticket unici: "
-        f"{ticket_out[['concessionario', 'id_ticket']].drop_duplicates().shape[0]}"
-    )
+    print(f"\nConcessionari presenti: {concessionari_validi}")
+    print(f"Eventi unici: {eventi_totali}")
+    print(f"Righe ticket-eventi: {righe_ticket_totali}")
+    print(f"Ticket unici: {ticket_unici_totali}")
 
     print("\nColonne ticket-eventi:")
     print(list(ticket_out.columns))
